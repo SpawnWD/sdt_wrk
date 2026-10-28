@@ -1,8 +1,14 @@
 import os
+import queue
+import re
 import subprocess
 import threading
+import time
 import tkinter as tk
+import unicodedata
+import xml.etree.ElementTree as ET
 from tkinter import filedialog, messagebox, scrolledtext, ttk
+from urllib.parse import urlparse
 
 # Intentar importar OpenCV y NumPy para el reconocimiento de formas
 try:
@@ -26,6 +32,11 @@ class ProfessionalPhoneController:
 
         # Detectar la ruta de ADB automáticamente (busca en 'herramientas' o en el sistema)
         self.adb = self.find_adb()
+        self.ui_queue = queue.Queue()
+        self.search_stop_event = threading.Event()
+        self.search_running = False
+        self.root.after(100, self._drain_ui_queue)
+        self.root.protocol("WM_DELETE_WINDOW", self.on_close)
 
         # Configuración de Estilo Global (TTK)
         style = ttk.Style()
@@ -52,14 +63,19 @@ class ProfessionalPhoneController:
 
         self.tab_general = ttk.Frame(self.notebook)
         self.tab_vision = ttk.Frame(self.notebook)
+        self.tab_search = ttk.Frame(self.notebook)
 
         self.notebook.add(self.tab_general, text=" Control y Automatización General ")
         self.notebook.add(
             self.tab_vision, text=" Reacciones por Forma (Computer Vision) "
         )
+        self.notebook.add(
+            self.tab_search, text=" Búsqueda por Palabras "
+        )
 
         self.create_general_widgets()
         self.create_vision_widgets()
+        self.create_search_widgets()
 
         # Consola de Registros global inferior
         self.create_console_widget()
@@ -205,6 +221,124 @@ class ProfessionalPhoneController:
                 command=lambda f=filename: self.execute_vision_reaction(f),
             ).pack(fill="x", pady=6, ipadx=10, ipady=3)
 
+    def create_search_widgets(self):
+        """Crea el modo asistido de búsqueda de publicaciones visibles."""
+        search_frame = ttk.LabelFrame(
+            self.tab_search,
+            text=" Búsqueda asistida en el contenido visible ",
+            padding=12,
+        )
+        search_frame.pack(fill="both", expand=True, padx=10, pady=10)
+
+        ttk.Label(
+            search_frame,
+            text=(
+                "Escribe palabras o frases separadas por comas o líneas. El panel "
+                "revisa el texto visible, desplaza la pantalla a intervalos y se "
+                "detiene al encontrar una coincidencia."
+            ),
+            wraplength=800,
+            justify="left",
+        ).pack(fill="x", pady=(0, 8))
+
+        ttk.Label(search_frame, text="Palabras clave:").pack(anchor="w")
+        self.search_keywords = scrolledtext.ScrolledText(
+            search_frame, height=4, font=("Segoe UI", 10)
+        )
+        self.search_keywords.pack(fill="x", pady=(3, 9))
+
+        settings_row = ttk.Frame(search_frame)
+        settings_row.pack(fill="x", pady=3)
+
+        ttk.Label(settings_row, text="Intervalo entre desplazamientos:").pack(
+            side="left"
+        )
+        self.search_interval_var = tk.StringVar(value="4")
+        ttk.Spinbox(
+            settings_row,
+            from_=1,
+            to=60,
+            width=5,
+            textvariable=self.search_interval_var,
+        ).pack(side="left", padx=(6, 4))
+        ttk.Label(settings_row, text="segundos").pack(side="left")
+
+        ttk.Label(settings_row, text="Máximo de desplazamientos:").pack(
+            side="left", padx=(22, 0)
+        )
+        self.search_max_scrolls_var = tk.StringVar(value="20")
+        ttk.Spinbox(
+            settings_row,
+            from_=1,
+            to=200,
+            width=6,
+            textvariable=self.search_max_scrolls_var,
+        ).pack(side="left", padx=(6, 0))
+
+        button_row = ttk.Frame(search_frame)
+        button_row.pack(fill="x", pady=(10, 6))
+        self.btn_start_search = ttk.Button(
+            button_row,
+            text="Iniciar búsqueda",
+            command=self.start_keyword_search,
+            style="Success.TButton",
+        )
+        self.btn_start_search.pack(side="left")
+        self.btn_stop_search = ttk.Button(
+            button_row,
+            text="Detener",
+            command=self.stop_keyword_search,
+            state="disabled",
+        )
+        self.btn_stop_search.pack(side="left", padx=7)
+        ttk.Button(
+            button_row,
+            text="Limpiar resultados",
+            command=self.clear_search_results,
+        ).pack(side="left")
+
+        self.search_status_var = tk.StringVar(value="Listo para buscar.")
+        ttk.Label(
+            search_frame,
+            textvariable=self.search_status_var,
+            foreground="#1d5f91",
+            font=("Segoe UI", 9, "bold"),
+        ).pack(fill="x", pady=(2, 7))
+
+        ttk.Label(search_frame, text="Resultados:").pack(anchor="w")
+        self.search_results = scrolledtext.ScrolledText(
+            search_frame,
+            height=8,
+            font=("Consolas", 9),
+            state="disabled",
+        )
+        self.search_results.pack(fill="both", expand=True, pady=(3, 9))
+
+        link_frame = ttk.LabelFrame(
+            search_frame, text=" Enlace de la publicación encontrada ", padding=8
+        )
+        link_frame.pack(fill="x")
+        ttk.Label(
+            link_frame,
+            text=(
+                "En Facebook usa Compartir > Copiar enlace. Después captura el "
+                "portapapeles o pega el enlace aquí para conservarlo."
+            ),
+            wraplength=780,
+            justify="left",
+        ).pack(fill="x", pady=(0, 6))
+        link_row = ttk.Frame(link_frame)
+        link_row.pack(fill="x")
+        self.search_link_var = tk.StringVar()
+        ttk.Entry(link_row, textvariable=self.search_link_var).pack(
+            side="left", fill="x", expand=True
+        )
+        ttk.Button(
+            link_row,
+            text="Capturar portapapeles",
+            command=self.capture_link_from_clipboard,
+        ).pack(side="left", padx=(7, 0))
+
     def create_console_widget(self):
         console_frame = ttk.LabelFrame(
             self.root, text=" Consola de Estado y Operaciones ", padding=10
@@ -220,14 +354,45 @@ class ProfessionalPhoneController:
         )
         self.console.pack(fill="both", expand=True, padx=5, pady=5)
 
+    def _drain_ui_queue(self):
+        """Procesa en el hilo de Tkinter los mensajes enviados por tareas ADB."""
+        try:
+            while True:
+                kind, payload = self.ui_queue.get_nowait()
+                if kind == "log" and hasattr(self, "console"):
+                    self.console.insert(tk.END, payload + "\n")
+                    self.console.see(tk.END)
+                elif kind == "call":
+                    payload()
+        except queue.Empty:
+            pass
+        except tk.TclError:
+            return
+
+        try:
+            self.root.after(100, self._drain_ui_queue)
+        except tk.TclError:
+            pass
+
+    def post_ui(self, callback):
+        self.ui_queue.put(("call", callback))
+
     def log(self, message):
-        self.console.insert(tk.END, message + "\n")
-        self.console.see(tk.END)
+        self.ui_queue.put(("log", str(message)))
+
+    def on_close(self):
+        self.search_stop_event.set()
+        self.root.destroy()
 
     def get_devices(self):
         try:
             result = subprocess.run(
-                [self.adb, "devices"], capture_output=True, text=True, check=True
+                [self.adb, "devices"],
+                capture_output=True,
+                text=True,
+                encoding="utf-8",
+                errors="replace",
+                check=True,
             )
             lines = result.stdout.strip().split("\n")[1:]
             devices = []
@@ -248,12 +413,37 @@ class ProfessionalPhoneController:
         )
         self.log(f"Dispositivos actualizados correctamente. Total: {count}")
 
-    def run_on_device(self, device, command):
+    def run_on_device(self, device, command, timeout=60):
         try:
             full_cmd = [self.adb, "-s", device] + command
-            subprocess.run(full_cmd, capture_output=True, text=True, check=True)
+            result = subprocess.run(
+                full_cmd,
+                capture_output=True,
+                text=True,
+                encoding="utf-8",
+                errors="replace",
+                check=True,
+                timeout=timeout,
+            )
+            return True, result.stdout.strip()
         except Exception as e:
             self.log(f"Error en [{device}]: {e}")
+            return False, str(e)
+
+    def adb_capture(self, device, command, timeout=30):
+        """Ejecuta ADB y devuelve texto o genera un error descriptivo."""
+        result = subprocess.run(
+            [self.adb, "-s", device] + command,
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            timeout=timeout,
+        )
+        if result.returncode != 0:
+            detail = (result.stderr or result.stdout or "Error ADB").strip()
+            raise RuntimeError(detail)
+        return result.stdout
 
     def execute_multithreaded(self, task_func):
         if not self.devices:
@@ -263,6 +453,267 @@ class ProfessionalPhoneController:
             return
         for dev in self.devices:
             threading.Thread(target=task_func, args=(dev,), daemon=True).start()
+
+    @staticmethod
+    def normalize_search_text(value):
+        decomposed = unicodedata.normalize("NFKD", value.casefold())
+        return "".join(char for char in decomposed if not unicodedata.combining(char))
+
+    def parse_search_keywords(self):
+        raw = self.search_keywords.get("1.0", tk.END)
+        keywords = [item.strip() for item in re.split(r"[,;\n]+", raw) if item.strip()]
+        return list(dict.fromkeys(keywords))
+
+    def get_visible_android_text(self, device):
+        """Obtiene el texto expuesto por la accesibilidad de la pantalla actual."""
+        remote_xml = "/sdcard/window_dump_panel.xml"
+        self.adb_capture(
+            device,
+            ["shell", "uiautomator", "dump", remote_xml],
+            timeout=20,
+        )
+        xml_data = self.adb_capture(
+            device,
+            ["exec-out", "cat", remote_xml],
+            timeout=20,
+        )
+        root = ET.fromstring(xml_data)
+        visible_parts = []
+        for node in root.iter("node"):
+            for attribute in ("text", "content-desc"):
+                value = node.attrib.get(attribute, "").strip()
+                if value:
+                    visible_parts.append(value)
+        return "\n".join(dict.fromkeys(visible_parts))
+
+    def get_screen_size(self, device):
+        output = self.adb_capture(device, ["shell", "wm", "size"], timeout=10)
+        matches = re.findall(r"(\d+)x(\d+)", output)
+        if not matches:
+            raise RuntimeError("No se pudo determinar el tamaño de pantalla.")
+        width, height = matches[-1]
+        return int(width), int(height)
+
+    def scroll_device_once(self, device):
+        width, height = self.get_screen_size(device)
+        center_x = width // 2
+        start_y = int(height * 0.78)
+        end_y = int(height * 0.28)
+        ok, detail = self.run_on_device(
+            device,
+            [
+                "shell",
+                "input",
+                "swipe",
+                str(center_x),
+                str(start_y),
+                str(center_x),
+                str(end_y),
+                "450",
+            ],
+            timeout=15,
+        )
+        if not ok:
+            raise RuntimeError(detail)
+
+    def append_search_result(self, message):
+        self.search_results.config(state="normal")
+        self.search_results.insert(tk.END, message + "\n")
+        self.search_results.see(tk.END)
+        self.search_results.config(state="disabled")
+
+    def clear_search_results(self):
+        if self.search_running:
+            messagebox.showwarning("Búsqueda activa", "Detén la búsqueda antes de limpiar.")
+            return
+        self.search_results.config(state="normal")
+        self.search_results.delete("1.0", tk.END)
+        self.search_results.config(state="disabled")
+        self.search_status_var.set("Listo para buscar.")
+
+    def start_keyword_search(self):
+        if self.search_running:
+            return
+
+        keywords = self.parse_search_keywords()
+        if not keywords:
+            messagebox.showwarning(
+                "Faltan palabras", "Escribe al menos una palabra o frase para buscar."
+            )
+            return
+
+        try:
+            interval = int(self.search_interval_var.get())
+            max_scrolls = int(self.search_max_scrolls_var.get())
+        except ValueError:
+            messagebox.showwarning(
+                "Valores incorrectos", "El intervalo y el máximo deben ser números enteros."
+            )
+            return
+
+        if not 1 <= interval <= 60:
+            messagebox.showwarning("Intervalo incorrecto", "Usa un intervalo de 1 a 60 segundos.")
+            return
+        if not 1 <= max_scrolls <= 200:
+            messagebox.showwarning(
+                "Límite incorrecto", "Usa un máximo de 1 a 200 desplazamientos."
+            )
+            return
+
+        devices = self.get_devices()
+        self.devices = devices
+        if not devices:
+            messagebox.showwarning(
+                "Sin dispositivos",
+                "No hay celulares autorizados. Conecta uno y vuelve a intentar.",
+            )
+            return
+
+        self.search_stop_event.clear()
+        self.search_running = True
+        self.btn_start_search.config(state="disabled")
+        self.btn_stop_search.config(state="normal")
+        self.search_status_var.set("Búsqueda en curso...")
+        self.append_search_result(
+            f"[{time.strftime('%H:%M:%S')}] Inicio · {len(devices)} dispositivo(s) · "
+            f"palabras: {', '.join(keywords)}"
+        )
+        self.log(
+            f"Búsqueda por palabras iniciada en {len(devices)} dispositivo(s)."
+        )
+
+        threading.Thread(
+            target=self.keyword_search_worker,
+            args=(devices, keywords, interval, max_scrolls),
+            daemon=True,
+        ).start()
+
+    def stop_keyword_search(self):
+        if self.search_running:
+            self.search_stop_event.set()
+            self.search_status_var.set("Deteniendo búsqueda...")
+            self.log("Se solicitó detener la búsqueda por palabras.")
+
+    def keyword_search_worker(self, devices, keywords, interval, max_scrolls):
+        normalized_keywords = {
+            keyword: self.normalize_search_text(keyword) for keyword in keywords
+        }
+        found_result = None
+        completed_scrolls = 0
+        errors = []
+
+        for step in range(max_scrolls + 1):
+            if self.search_stop_event.is_set():
+                break
+
+            for device in devices:
+                if self.search_stop_event.is_set():
+                    break
+                try:
+                    visible_text = self.get_visible_android_text(device)
+                    normalized_text = self.normalize_search_text(visible_text)
+                    matches = [
+                        original
+                        for original, normalized in normalized_keywords.items()
+                        if normalized in normalized_text
+                    ]
+                    if matches:
+                        found_result = (device, matches, step, visible_text)
+                        self.search_stop_event.set()
+                        break
+                except Exception as error:
+                    errors.append(f"{device}: {error}")
+                    self.log(f"Error analizando pantalla de [{device}]: {error}")
+
+            if found_result or self.search_stop_event.is_set():
+                break
+            if step >= max_scrolls:
+                break
+
+            for device in devices:
+                if self.search_stop_event.is_set():
+                    break
+                try:
+                    self.scroll_device_once(device)
+                except Exception as error:
+                    errors.append(f"{device}: {error}")
+                    self.log(f"Error desplazando pantalla de [{device}]: {error}")
+            completed_scrolls += 1
+            if self.search_stop_event.wait(interval):
+                break
+
+        if found_result:
+            device, matches, step, visible_text = found_result
+            preview = " ".join(visible_text.split())[:240]
+            result_message = (
+                f"[{time.strftime('%H:%M:%S')}] COINCIDENCIA en {device} · "
+                f"{', '.join(matches)} · después de {step} desplazamiento(s)\n"
+                f"Vista previa: {preview}"
+            )
+            status = f"Coincidencia encontrada en {device}. Revisa la pantalla."
+            self.log(
+                f"Coincidencia encontrada en [{device}]: {', '.join(matches)}."
+            )
+        elif self.search_stop_event.is_set():
+            result_message = (
+                f"[{time.strftime('%H:%M:%S')}] Búsqueda detenida · "
+                f"{completed_scrolls} desplazamiento(s)."
+            )
+            status = "Búsqueda detenida por el operador."
+        else:
+            result_message = (
+                f"[{time.strftime('%H:%M:%S')}] Sin coincidencias · "
+                f"límite de {max_scrolls} desplazamiento(s) alcanzado."
+            )
+            status = "Búsqueda terminada sin coincidencias."
+
+        if errors:
+            result_message += f"\nAvisos técnicos: {len(errors)}"
+
+        self.post_ui(
+            lambda message=result_message, final_status=status: self.finish_keyword_search(
+                message, final_status
+            )
+        )
+
+    def finish_keyword_search(self, message, status):
+        self.append_search_result(message)
+        self.search_status_var.set(status)
+        self.btn_start_search.config(state="normal")
+        self.btn_stop_search.config(state="disabled")
+        self.search_running = False
+
+    def capture_link_from_clipboard(self):
+        try:
+            value = self.root.clipboard_get().strip()
+        except tk.TclError:
+            messagebox.showwarning(
+                "Portapapeles vacío",
+                "Copia primero el enlace de la publicación desde Facebook.",
+            )
+            return
+
+        parsed = urlparse(value)
+        if parsed.scheme not in ("http", "https") or not parsed.netloc:
+            messagebox.showwarning(
+                "Contenido no válido", "El portapapeles no contiene un enlace web."
+            )
+            return
+
+        host = parsed.netloc.casefold().split(":")[0]
+        facebook_hosts = ("facebook.com", "fb.com", "fb.watch")
+        if not any(host == item or host.endswith("." + item) for item in facebook_hosts):
+            messagebox.showwarning(
+                "Enlace no reconocido",
+                "El enlace no parece pertenecer a Facebook. Revísalo antes de guardarlo.",
+            )
+            return
+
+        self.search_link_var.set(value)
+        self.append_search_result(
+            f"[{time.strftime('%H:%M:%S')}] Enlace capturado: {value}"
+        )
+        self.log("Enlace de publicación capturado desde el portapapeles.")
 
     def open_facebook_all(self):
         self.log("Abriendo Facebook en todos los dispositivos...")

@@ -59,6 +59,22 @@ PUBLICAR TEXTO EN FACEBOOK
 - Mientras pega, no muevas el mouse ni escribas (tarda 1 segundo por
   celular).
 
+BUSCAR PUBLICACIONES POR PALABRAS
+1. Abre Facebook y deja visible el inicio o la sección que quieras revisar.
+2. En el panel abre la pestaña "Búsqueda por Palabras".
+3. Escribe palabras o frases separadas por comas o líneas.
+4. Elige el intervalo y el máximo de desplazamientos.
+5. Pulsa "Iniciar búsqueda". El panel revisa únicamente el texto que Android
+   expone en la pantalla visible y desplaza el contenido a intervalos.
+6. Al encontrar una coincidencia se detiene para que la revises manualmente.
+7. Para conservar el enlace, en Facebook usa Compartir > Copiar enlace y
+   después pulsa "Capturar portapapeles" en el panel.
+- Puedes detener la búsqueda en cualquier momento.
+- La búsqueda tiene un límite; no funciona de forma indefinida.
+- Facebook puede no exponer todo el texto mediante la accesibilidad de
+  Android. Una publicación visible podría no ser detectada.
+- Esta función no reacciona, comenta, comparte ni publica automáticamente.
+
 ABRIR UNA PUBLICACIÓN
 1. En Facebook, en la publicación, toca Compartir > "Copiar enlace".
 2. Pégalo en "Link de publicación" (arriba en el panel).

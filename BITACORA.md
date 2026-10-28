@@ -15,13 +15,13 @@ Esta bitácora registra el estado base del proyecto y todos los cambios que se r
 9. Para cambios publicados se debe preferir una reversión que conserve el historial.
 10. La bitácora debe actualizarse en la misma sesión en la que se realiza el cambio.
 
-## Cambios en curso
+## Cambios completados
 
 ### CHG-20261027-2204 — Búsqueda asistida por palabras clave
 
 - Fecha y hora: 2026-10-27 22:04:56 (America/Mexico_City)
 - Tipo: Funcionalidad y optimización
-- Estado: En curso
+- Estado: Completado el 2026-10-28 06:06:51 (America/Mexico_City)
 - Responsable: Codex, bajo solicitud del propietario
 - Solicitud: Incorporar desplazamiento por intervalo, búsqueda de palabras clave y captura del enlace de una publicación.
 - Motivo: Facilitar la localización asistida de publicaciones visibles en Facebook sin ejecutar reacciones, comentarios ni publicaciones automáticas.
@@ -44,14 +44,33 @@ Esta bitácora registra el estado base del proyecto y todos los cambios que se r
   - Sin reacciones, comentarios, mensajes o publicaciones automáticas.
   - Sin técnicas para ocultar automatización.
   - Cancelación disponible en todo momento.
-- Referencia previa de rollback: Línea base `BASE-20261027-2158` y commit Git local que se creará antes de editar archivos funcionales.
-- Archivos modificados: Pendiente.
-- Pruebas realizadas: Pendiente.
-- Resultado de las pruebas: Pendiente.
-- Hash, commit o versión resultante: Pendiente.
-- Publicado o respaldado: Pendiente.
+- Referencia previa de rollback: Línea base `BASE-20261027-2158`, commit Git local `ad09ce2`.
+- Archivos modificados:
+  - `panel.py`: nueva pestaña, búsqueda limitada, lectura accesible, scroll proporcional, cancelación, captura de enlace y cola segura para actualizar Tkinter.
+  - `LEEME.txt`: instrucciones, alcance y limitaciones del modo de búsqueda.
+  - `BITACORA.md`: cierre y resultados de este cambio.
+- Pruebas realizadas:
+  - Análisis de sintaxis e importación de `panel.py`.
+  - Comprobación de OpenCV.
+  - Creación de la interfaz Tkinter en memoria y verificación de sus tres pestañas.
+  - Prueba simulada de coincidencia inmediata, límite de desplazamientos y normalización de acentos.
+  - Lectura real mediante ADB y `uiautomator` en el Moto E6 Play `ZE222HSLC9`.
+  - Prueba real de coincidencia sobre texto visible y detención antes del siguiente scroll.
+  - Ejecución real de un desplazamiento ADB controlado.
+  - Prueba aislada de validación y captura de un enlace de Facebook.
+  - Arranque visual del panel actualizado y comprobación de proceso responsivo.
+- Resultado de las pruebas: Correcto. Se detectó y corrigió durante la validación un problema de codificación de caracteres provenientes de ADB; la lectura interna conserva Unicode y la búsqueda ignora diferencias de acentos y mayúsculas.
+- Limitaciones pendientes:
+  - Falta validar la detección dentro de una publicación real de Facebook, porque la aplicación puede ocultar parte del texto a la accesibilidad de Android.
+  - La captura real del enlace requiere que el operador use `Compartir > Copiar enlace`; no se probó con una cuenta de Facebook durante este cambio.
+  - La búsqueda no usa OCR; sólo analiza texto expuesto por Android.
+- Hashes resultantes:
+  - `panel.py`: `39F377041A4C60A5486A29F16E693829A9A73D500856CB6538F9F3ED549A492E`
+  - `LEEME.txt`: `E1F49B6F1C369600F4F91974A6093A8118D383BE596E901E46B2833E17BB47F9`
+- Commit resultante: El commit Git local que contiene esta entrada y los archivos modificados.
+- Publicado o respaldado: Respaldado en Git local; no se configuró ni utilizó un repositorio remoto.
 - Procedimiento de rollback: Restaurar `panel.py` y `LEEME.txt` desde el commit local de línea base.
-- Observaciones: Esta entrada fue registrada antes de modificar el código funcional.
+- Observaciones: La entrada se creó antes de modificar el código funcional. Se conservaron la autoría, estructura y funciones originales; la nueva capacidad se agregó como una pestaña independiente.
 
 ## Estado base protegido
 
