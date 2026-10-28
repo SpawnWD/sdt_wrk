@@ -17,6 +17,44 @@ Esta bitácora registra el estado base del proyecto y todos los cambios que se r
 
 ## Cambios completados
 
+### CHG-20261028-0620 — Optimización de velocidad del scroll
+
+- Fecha y hora: 2026-10-28 06:20:31 (America/Mexico_City)
+- Tipo: Optimización
+- Estado: Completado el 2026-10-28 06:23:40 (America/Mexico_City)
+- Responsable: Codex, bajo solicitud del propietario
+- Solicitud: Reducir el tiempo entre desplazamientos durante la búsqueda por palabras.
+- Diagnóstico inicial:
+  - Lectura normal de accesibilidad y descarga: aproximadamente 1.29 segundos en el Moto E6 Play.
+  - El intervalo predeterminado agrega actualmente 4 segundos después de cada análisis.
+  - El tamaño de pantalla se consulta nuevamente en cada desplazamiento.
+  - El modo comprimido de `uiautomator` resultó más lento en este dispositivo y no se utilizará.
+- Cambio propuesto:
+  - Reducir el intervalo predeterminado.
+  - Permitir intervalos decimales seguros.
+  - Interpretar el intervalo como duración mínima total del ciclo, evitando sumar esperas innecesarias al tiempo del análisis.
+  - Obtener y reutilizar las coordenadas de scroll por dispositivo.
+- Archivos modificados: `panel.py`, `LEEME.txt` y `BITACORA.md`.
+- Referencia de rollback: Commit anterior `7d9ab44`.
+- Límites preservados: máximo de desplazamientos, cancelación y análisis de cada pantalla.
+- Pruebas realizadas:
+  - Comparación de lectura normal, comprimida y salida directa de `uiautomator`.
+  - Prueba real de dos desplazamientos en el Moto E6 Play `ZE222HSLC9`.
+  - Verificación de caché del tamaño de pantalla.
+  - Comprobación de sintaxis y diferencias Git.
+- Resultado:
+  - Intervalo predeterminado reducido de 4 a 1 segundo.
+  - Intervalos decimales aceptados desde 0.5 segundos.
+  - La espera ahora completa sólo el tiempo restante del ciclo y no se suma íntegramente al análisis.
+  - El tamaño de pantalla se consulta una vez por búsqueda y se reutiliza.
+  - El modo comprimido no se adoptó porque fue más lento en el dispositivo probado.
+  - Dos desplazamientos con análisis completo tardaron 14.33 segundos. Bajo las mismas condiciones, el comportamiento anterior habría añadido 8 segundos de espera, para un estimado de 22.33 segundos; la reducción estimada es de aproximadamente 36 %.
+- Limitación: La lectura de accesibilidad de Android sigue siendo el principal cuello de botella y puede variar según la pantalla de Facebook.
+- Hashes resultantes:
+  - `panel.py`: `95D1D7C0D4CAD4259AA44B7EC132684CE68BE089C3597D6C0E5B8B997FAC0DC5`
+  - `LEEME.txt`: `838E62172DE0C1622EB352AB36D03625D328D832C36226E269155C5DC29CBC67`
+- Commit resultante: El commit Git local que contiene esta entrada.
+
 ### CHG-20261027-2204 — Búsqueda asistida por palabras clave
 
 - Fecha y hora: 2026-10-27 22:04:56 (America/Mexico_City)

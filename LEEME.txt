@@ -70,6 +70,9 @@ BUSCAR PUBLICACIONES POR PALABRAS
 7. Para conservar el enlace, en Facebook usa Compartir > Copiar enlace y
    después pulsa "Capturar portapapeles" en el panel.
 - Puedes detener la búsqueda en cualquier momento.
+- El intervalo predeterminado es 1 segundo y acepta valores desde 0.5. El
+  análisis de accesibilidad del celular puede tardar más que el intervalo;
+  en ese caso el siguiente ciclo comienza en cuanto termina el análisis.
 - La búsqueda tiene un límite; no funciona de forma indefinida.
 - Facebook puede no exponer todo el texto mediante la accesibilidad de
   Android. Una publicación visible podría no ser detectada.

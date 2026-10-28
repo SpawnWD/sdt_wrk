@@ -35,6 +35,7 @@ class ProfessionalPhoneController:
         self.ui_queue = queue.Queue()
         self.search_stop_event = threading.Event()
         self.search_running = False
+        self.screen_size_cache = {}
         self.root.after(100, self._drain_ui_queue)
         self.root.protocol("WM_DELETE_WINDOW", self.on_close)
 
@@ -253,11 +254,12 @@ class ProfessionalPhoneController:
         ttk.Label(settings_row, text="Intervalo entre desplazamientos:").pack(
             side="left"
         )
-        self.search_interval_var = tk.StringVar(value="4")
+        self.search_interval_var = tk.StringVar(value="1")
         ttk.Spinbox(
             settings_row,
-            from_=1,
+            from_=0.5,
             to=60,
+            increment=0.5,
             width=5,
             textvariable=self.search_interval_var,
         ).pack(side="left", padx=(6, 4))
@@ -495,7 +497,11 @@ class ProfessionalPhoneController:
         return int(width), int(height)
 
     def scroll_device_once(self, device):
-        width, height = self.get_screen_size(device)
+        size = self.screen_size_cache.get(device)
+        if size is None:
+            size = self.get_screen_size(device)
+            self.screen_size_cache[device] = size
+        width, height = size
         center_x = width // 2
         start_y = int(height * 0.78)
         end_y = int(height * 0.28)
@@ -543,16 +549,19 @@ class ProfessionalPhoneController:
             return
 
         try:
-            interval = int(self.search_interval_var.get())
+            interval = float(self.search_interval_var.get().replace(",", "."))
             max_scrolls = int(self.search_max_scrolls_var.get())
         except ValueError:
             messagebox.showwarning(
-                "Valores incorrectos", "El intervalo y el máximo deben ser números enteros."
+                "Valores incorrectos",
+                "El intervalo debe ser numérico y el máximo debe ser un número entero.",
             )
             return
 
-        if not 1 <= interval <= 60:
-            messagebox.showwarning("Intervalo incorrecto", "Usa un intervalo de 1 a 60 segundos.")
+        if not 0.5 <= interval <= 60:
+            messagebox.showwarning(
+                "Intervalo incorrecto", "Usa un intervalo de 0.5 a 60 segundos."
+            )
             return
         if not 1 <= max_scrolls <= 200:
             messagebox.showwarning(
@@ -570,6 +579,7 @@ class ProfessionalPhoneController:
             return
 
         self.search_stop_event.clear()
+        self.screen_size_cache.clear()
         self.search_running = True
         self.btn_start_search.config(state="disabled")
         self.btn_stop_search.config(state="normal")
@@ -605,6 +615,7 @@ class ProfessionalPhoneController:
         for step in range(max_scrolls + 1):
             if self.search_stop_event.is_set():
                 break
+            cycle_started = time.monotonic()
 
             for device in devices:
                 if self.search_stop_event.is_set():
@@ -639,7 +650,9 @@ class ProfessionalPhoneController:
                     errors.append(f"{device}: {error}")
                     self.log(f"Error desplazando pantalla de [{device}]: {error}")
             completed_scrolls += 1
-            if self.search_stop_event.wait(interval):
+            elapsed = time.monotonic() - cycle_started
+            remaining = max(0.0, interval - elapsed)
+            if self.search_stop_event.wait(remaining):
                 break
 
         if found_result:
