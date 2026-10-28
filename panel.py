@@ -1,3 +1,4 @@
+import ctypes
 import json
 import math
 import os
@@ -14,6 +15,38 @@ from tkinter import filedialog, messagebox, scrolledtext, simpledialog, ttk
 from urllib.parse import urlparse
 
 NO_WINDOW = getattr(subprocess, "CREATE_NO_WINDOW", 0) if os.name == "nt" else 0
+INSTANCE_MUTEX = None
+
+
+def acquire_single_instance():
+    """Impide que dos copias del panel administren los mismos dispositivos."""
+    global INSTANCE_MUTEX
+    if os.name != "nt":
+        return True
+    kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+    kernel32.CreateMutexW.argtypes = (ctypes.c_void_p, ctypes.c_bool, ctypes.c_wchar_p)
+    kernel32.CreateMutexW.restype = ctypes.c_void_p
+    kernel32.CloseHandle.argtypes = (ctypes.c_void_p,)
+    kernel32.CloseHandle.restype = ctypes.c_bool
+    ctypes.set_last_error(0)
+    handle = kernel32.CreateMutexW(
+        None, False, "Local\\PanelCelularesV2_MultiDispositivo"
+    )
+    if not handle:
+        return False
+    if ctypes.get_last_error() == 183:  # ERROR_ALREADY_EXISTS
+        kernel32.CloseHandle(handle)
+        return False
+    INSTANCE_MUTEX = (kernel32, handle)
+    return True
+
+
+def release_single_instance():
+    global INSTANCE_MUTEX
+    if INSTANCE_MUTEX:
+        kernel32, handle = INSTANCE_MUTEX
+        kernel32.CloseHandle(handle)
+        INSTANCE_MUTEX = None
 
 # Intentar importar OpenCV y NumPy para el reconocimiento de formas
 try:
@@ -389,6 +422,39 @@ class ProfessionalPhoneController:
             textvariable=self.search_max_scrolls_var,
         ).pack(side="left", padx=(6, 0))
 
+        expand_row = ttk.Frame(search_frame)
+        expand_row.pack(fill="x", pady=3)
+        self.search_expand_more_var = tk.BooleanVar(value=True)
+        ttk.Checkbutton(
+            expand_row,
+            text='Expandir "Ver más" antes de continuar',
+            variable=self.search_expand_more_var,
+        ).pack(side="left")
+        ttk.Label(expand_row, text="Máximo por pantalla:").pack(
+            side="left", padx=(22, 0)
+        )
+        self.search_max_expansions_var = tk.StringVar(value="3")
+        ttk.Spinbox(
+            expand_row,
+            from_=1,
+            to=10,
+            width=4,
+            textvariable=self.search_max_expansions_var,
+        ).pack(side="left", padx=(6, 0))
+        ttk.Label(expand_row, text="Espera después de expandir:").pack(
+            side="left", padx=(22, 0)
+        )
+        self.search_expand_wait_var = tk.StringVar(value="0.7")
+        ttk.Spinbox(
+            expand_row,
+            from_=0.2,
+            to=5,
+            increment=0.1,
+            width=5,
+            textvariable=self.search_expand_wait_var,
+        ).pack(side="left", padx=(6, 4))
+        ttk.Label(expand_row, text="segundos").pack(side="left")
+
         button_row = ttk.Frame(search_frame)
         button_row.pack(fill="x", pady=(10, 6))
         self.btn_start_search = ttk.Button(
@@ -422,7 +488,7 @@ class ProfessionalPhoneController:
         ttk.Label(search_frame, text="Resultados:").pack(anchor="w")
         self.search_results = scrolledtext.ScrolledText(
             search_frame,
-            height=8,
+            height=7,
             font=("Consolas", 9),
             state="disabled",
         )
@@ -803,8 +869,8 @@ class ProfessionalPhoneController:
         keywords = [item.strip() for item in re.split(r"[,;\n]+", raw) if item.strip()]
         return list(dict.fromkeys(keywords))
 
-    def get_visible_android_text(self, device):
-        """Obtiene el texto expuesto por la accesibilidad de la pantalla actual."""
+    def get_android_hierarchy(self, device):
+        """Obtiene la jerarquía accesible de la pantalla actual."""
         remote_xml = "/sdcard/window_dump_panel.xml"
         self.adb_capture(
             device,
@@ -816,14 +882,83 @@ class ProfessionalPhoneController:
             ["exec-out", "cat", remote_xml],
             timeout=20,
         )
-        root = ET.fromstring(xml_data)
+        return ET.fromstring(xml_data)
+
+    @staticmethod
+    def extract_visible_text(hierarchy):
         visible_parts = []
-        for node in root.iter("node"):
+        for node in hierarchy.iter("node"):
             for attribute in ("text", "content-desc"):
                 value = node.attrib.get(attribute, "").strip()
                 if value:
                     visible_parts.append(value)
         return "\n".join(dict.fromkeys(visible_parts))
+
+    def get_visible_android_text(self, device):
+        """Obtiene el texto expuesto por la accesibilidad de la pantalla actual."""
+        return self.extract_visible_text(self.get_android_hierarchy(device))
+
+    def find_expand_more_points(self, hierarchy):
+        """Localiza únicamente controles visibles con etiqueta exacta Ver más."""
+        accepted_labels = {"ver mas", "see more"}
+        points = []
+        seen = set()
+        for node in hierarchy.iter("node"):
+            if node.attrib.get("visible-to-user", "true").casefold() == "false":
+                continue
+            if node.attrib.get("enabled", "true").casefold() == "false":
+                continue
+            labels = {
+                self.normalize_search_text(node.attrib.get(attribute, "").strip())
+                for attribute in ("text", "content-desc")
+                if node.attrib.get(attribute, "").strip()
+            }
+            if not labels.intersection(accepted_labels):
+                continue
+            match = re.fullmatch(
+                r"\[(\d+),(\d+)\]\[(\d+),(\d+)\]",
+                node.attrib.get("bounds", ""),
+            )
+            if not match:
+                continue
+            left, top, right, bottom = map(int, match.groups())
+            if right <= left or bottom <= top:
+                continue
+            point = ((left + right) // 2, (top + bottom) // 2)
+            if point not in seen:
+                seen.add(point)
+                points.append(point)
+        return points
+
+    def expand_visible_more(self, device, hierarchy, maximum, wait_seconds):
+        """Expande controles Ver más con límite y vuelve a leer tras cada toque."""
+        current_hierarchy = hierarchy
+        expanded = 0
+        tapped_points = set()
+        while expanded < maximum and not self.search_stop_event.is_set():
+            candidates = [
+                point
+                for point in self.find_expand_more_points(current_hierarchy)
+                if point not in tapped_points
+            ]
+            if not candidates:
+                break
+            x, y = candidates[0]
+            tapped_points.add((x, y))
+            ok, detail = self.run_on_device(
+                device,
+                ["shell", "input", "tap", str(x), str(y)],
+                timeout=15,
+            )
+            if not ok:
+                self.log(f"No se pudo expandir 'Ver más' en [{device}]: {detail}")
+                break
+            expanded += 1
+            self.log(f"Se expandió 'Ver más' en [{device}] ({expanded}/{maximum}).")
+            if self.search_stop_event.wait(wait_seconds):
+                break
+            current_hierarchy = self.get_android_hierarchy(device)
+        return expanded, current_hierarchy
 
     def get_screen_size(self, device):
         output = self.adb_capture(device, ["shell", "wm", "size"], timeout=10)
@@ -888,10 +1023,14 @@ class ProfessionalPhoneController:
         try:
             interval = float(self.search_interval_var.get().replace(",", "."))
             max_scrolls = int(self.search_max_scrolls_var.get())
+            max_expansions = int(self.search_max_expansions_var.get())
+            expand_wait = float(
+                self.search_expand_wait_var.get().replace(",", ".")
+            )
         except ValueError:
             messagebox.showwarning(
                 "Valores incorrectos",
-                "El intervalo debe ser numérico y el máximo debe ser un número entero.",
+                "Los intervalos deben ser numéricos y los máximos deben ser enteros.",
             )
             return
 
@@ -905,6 +1044,18 @@ class ProfessionalPhoneController:
                 "Límite incorrecto", "Usa un máximo de 1 a 200 desplazamientos."
             )
             return
+        if not 1 <= max_expansions <= 10:
+            messagebox.showwarning(
+                "Límite incorrecto", "Usa de 1 a 10 expansiones por pantalla."
+            )
+            return
+        if not 0.2 <= expand_wait <= 5:
+            messagebox.showwarning(
+                "Espera incorrecta", "Usa una espera de 0.2 a 5 segundos."
+            )
+            return
+
+        expand_more = bool(self.search_expand_more_var.get())
 
         selected_devices = self.get_selected_devices()
         connected_devices = set(self.get_devices())
@@ -925,7 +1076,8 @@ class ProfessionalPhoneController:
         self.search_status_var.set("Búsqueda en curso...")
         self.append_search_result(
             f"[{time.strftime('%H:%M:%S')}] Inicio · {len(devices)} dispositivo(s) · "
-            f"palabras: {', '.join(keywords)}"
+            f"palabras: {', '.join(keywords)} · "
+            f"expandir Ver más: {'sí' if expand_more else 'no'}"
         )
         self.log(
             f"Búsqueda por palabras iniciada en {len(devices)} dispositivo(s)."
@@ -935,7 +1087,15 @@ class ProfessionalPhoneController:
 
         threading.Thread(
             target=self.keyword_search_worker,
-            args=(devices, keywords, interval, max_scrolls),
+            args=(
+                devices,
+                keywords,
+                interval,
+                max_scrolls,
+                expand_more,
+                max_expansions,
+                expand_wait,
+            ),
             daemon=True,
         ).start()
 
@@ -945,12 +1105,22 @@ class ProfessionalPhoneController:
             self.search_status_var.set("Deteniendo búsqueda...")
             self.log("Se solicitó detener la búsqueda por palabras.")
 
-    def keyword_search_worker(self, devices, keywords, interval, max_scrolls):
+    def keyword_search_worker(
+        self,
+        devices,
+        keywords,
+        interval,
+        max_scrolls,
+        expand_more=False,
+        max_expansions=3,
+        expand_wait=0.7,
+    ):
         normalized_keywords = {
             keyword: self.normalize_search_text(keyword) for keyword in keywords
         }
         found_result = None
         completed_scrolls = 0
+        total_expansions = 0
         errors = []
 
         for step in range(max_scrolls + 1):
@@ -962,15 +1132,39 @@ class ProfessionalPhoneController:
                 if self.search_stop_event.is_set():
                     break
                 try:
-                    visible_text = self.get_visible_android_text(device)
+                    hierarchy = self.get_android_hierarchy(device)
+                    visible_text = self.extract_visible_text(hierarchy)
                     normalized_text = self.normalize_search_text(visible_text)
                     matches = [
                         original
                         for original, normalized in normalized_keywords.items()
                         if normalized in normalized_text
                     ]
+                    expanded = 0
+                    if not matches and expand_more:
+                        expanded, hierarchy = self.expand_visible_more(
+                            device,
+                            hierarchy,
+                            max_expansions,
+                            expand_wait,
+                        )
+                        total_expansions += expanded
+                        if expanded and not self.search_stop_event.is_set():
+                            visible_text = self.extract_visible_text(hierarchy)
+                            normalized_text = self.normalize_search_text(visible_text)
+                            matches = [
+                                original
+                                for original, normalized in normalized_keywords.items()
+                                if normalized in normalized_text
+                            ]
                     if matches:
-                        found_result = (device, matches, step, visible_text)
+                        found_result = (
+                            device,
+                            matches,
+                            step,
+                            visible_text,
+                            expanded,
+                        )
                         self.search_stop_event.set()
                         break
                 except Exception as error:
@@ -997,11 +1191,17 @@ class ProfessionalPhoneController:
                 break
 
         if found_result:
-            device, matches, step, visible_text = found_result
+            device, matches, step, visible_text, expanded = found_result
             preview = " ".join(visible_text.split())[:240]
+            expansion_detail = (
+                f" · {expanded} expansión(es) en la pantalla coincidente"
+                if expanded
+                else ""
+            )
             result_message = (
                 f"[{time.strftime('%H:%M:%S')}] COINCIDENCIA en {device} · "
-                f"{', '.join(matches)} · después de {step} desplazamiento(s)\n"
+                f"{', '.join(matches)} · después de {step} desplazamiento(s)"
+                f"{expansion_detail}\n"
                 f"Vista previa: {preview}"
             )
             status = f"Coincidencia encontrada en {device}. Revisa la pantalla."
@@ -1011,13 +1211,15 @@ class ProfessionalPhoneController:
         elif self.search_stop_event.is_set():
             result_message = (
                 f"[{time.strftime('%H:%M:%S')}] Búsqueda detenida · "
-                f"{completed_scrolls} desplazamiento(s)."
+                f"{completed_scrolls} desplazamiento(s) · "
+                f"{total_expansions} expansión(es)."
             )
             status = "Búsqueda detenida por el operador."
         else:
             result_message = (
                 f"[{time.strftime('%H:%M:%S')}] Sin coincidencias · "
-                f"límite de {max_scrolls} desplazamiento(s) alcanzado."
+                f"límite de {max_scrolls} desplazamiento(s) alcanzado · "
+                f"{total_expansions} expansión(es)."
             )
             status = "Búsqueda terminada sin coincidencias."
 
@@ -1205,6 +1407,19 @@ class ProfessionalPhoneController:
 
 
 if __name__ == "__main__":
-    root = tk.Tk()
-    app = ProfessionalPhoneController(root)
-    root.mainloop()
+    if not acquire_single_instance():
+        notice = tk.Tk()
+        notice.withdraw()
+        messagebox.showinfo(
+            "Panel ya abierto",
+            "Ya existe una instancia del Panel de Celulares en ejecución.",
+            parent=notice,
+        )
+        notice.destroy()
+        raise SystemExit(0)
+    try:
+        root = tk.Tk()
+        app = ProfessionalPhoneController(root)
+        root.mainloop()
+    finally:
+        release_single_instance()

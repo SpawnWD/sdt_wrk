@@ -29,6 +29,8 @@ PREPARAR CADA CELULAR (una sola vez)
    Usa un cable que sí transmita datos (algunos solo cargan).
 
 USO DIARIO
+- El panel permite una sola instancia activa. Si intentas abrirlo otra vez,
+  mostrará un aviso en lugar de duplicar controles o tareas.
 - Los celulares aparecen en una tabla con nombre, modelo, serie, versión de
   Android, conexión y tarea actual.
 - Selecciona uno o varios renglones. Usa Ctrl o Shift para formar grupos, o
@@ -72,17 +74,23 @@ BUSCAR PUBLICACIONES POR PALABRAS
 2. En el panel abre la pestaña "Búsqueda por Palabras".
 3. Escribe palabras o frases separadas por comas o líneas.
 4. Elige el intervalo y el máximo de desplazamientos.
-5. Pulsa "Iniciar búsqueda". El panel revisa únicamente el texto que Android
+5. Deja marcada "Expandir Ver más" si quieres que el panel despliegue el
+   texto contraído antes de descartar una publicación. También puedes elegir
+   el máximo de expansiones por pantalla y la espera después de cada toque.
+6. Pulsa "Iniciar búsqueda". El panel revisa únicamente el texto que Android
    expone en la pantalla visible de los celulares seleccionados y desplaza el
    contenido a intervalos.
-6. Al encontrar una coincidencia se detiene para que la revises manualmente.
-7. Para conservar el enlace, en Facebook usa Compartir > Copiar enlace y
+7. Al encontrar una coincidencia se detiene para que la revises manualmente.
+8. Para conservar el enlace, en Facebook usa Compartir > Copiar enlace y
    después pulsa "Capturar portapapeles" en el panel.
 - Puedes detener la búsqueda en cualquier momento.
 - El intervalo predeterminado es 1 segundo y acepta valores desde 0.5. El
   análisis de accesibilidad del celular puede tardar más que el intervalo;
   en ese caso el siguiente ciclo comienza en cuanto termina el análisis.
 - La búsqueda tiene un límite; no funciona de forma indefinida.
+- La expansión acepta únicamente controles cuya etiqueta accesible sea
+  exactamente "Ver más" o "See more". No toca "Ver más comentarios",
+  "Ver respuestas" ni etiquetas parciales.
 - Facebook puede no exponer todo el texto mediante la accesibilidad de
   Android. Una publicación visible podría no ser detectada.
 - Esta función no reacciona, comenta, comparte ni publica automáticamente.

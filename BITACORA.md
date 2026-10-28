@@ -17,6 +17,46 @@ Esta bitácora registra el estado base del proyecto y todos los cambios que se r
 
 ## Cambios completados
 
+### CHG-20261028-1746 — Instancia única y expansión de “Ver más”
+
+- Fecha y hora: 2026-10-28 17:46:20 (America/Mexico_City)
+- Tipo: Corrección y mejora de búsqueda
+- Estado: Completado el 2026-10-28 17:48:43 (America/Mexico_City)
+- Responsable: Codex, bajo solicitud del propietario
+- Solicitud:
+  - Evitar paneles y ventanas duplicadas.
+  - Expandir texto contraído de publicaciones antes de descartar palabras clave.
+- Cambio propuesto:
+  - Bloqueo de instancia única en Windows.
+  - Mantener una sola ventana scrcpy por serie dentro del panel activo.
+  - Opción configurable para expandir textos cuyo control visible sea exactamente `Ver más` o `See more`.
+  - Límite de expansiones por pantalla y espera configurable.
+  - Volver a leer la jerarquía de accesibilidad después de cada expansión.
+- Exclusiones intencionales:
+  - No pulsar `Ver más comentarios`, `Ver respuestas` o coincidencias parciales.
+  - No reaccionar, comentar, compartir ni publicar.
+  - No realizar expansiones indefinidas.
+- Archivos modificados: `panel.py`, `LEEME.txt` y `BITACORA.md`.
+- Referencia de rollback: Commit anterior `277edcf`.
+- Implementación:
+  - Se agregó un mutex con nombre en Windows para impedir que dos paneles administren los mismos celulares simultáneamente.
+  - Se agregó una casilla para habilitar o deshabilitar la expansión, un máximo de 1 a 10 expansiones por pantalla y una espera de 0.2 a 5 segundos.
+  - La búsqueda obtiene una nueva jerarquía accesible después de cada toque y vuelve a analizar el texto antes de hacer scroll.
+  - El resultado informa cuántas expansiones se hicieron y conserva los límites de scroll existentes.
+- Pruebas realizadas:
+  - Validación de sintaxis mediante AST y revisión de `git diff --check`.
+  - Jerarquía XML simulada con `Ver más`, `See more`, `Ver más comentarios`, `Ver respuestas` y un control invisible; sólo se aceptaron los dos controles exactos y visibles.
+  - Ciclo simulado de búsqueda: la palabra oculta se detectó después de una expansión y no se ejecutó scroll adicional.
+  - Comprobación del mutex: la primera adquisición fue aceptada y la segunda fue rechazada.
+  - Creación real de la interfaz y validación de los valores iniciales de los nuevos controles.
+  - Lectura no invasiva de la jerarquía del teléfono autorizado `ZE222HSLC9`; se detectaron cero controles exactos en la pantalla actual y no se enviaron toques.
+- Resultado: Correcto. La búsqueda puede revelar texto contraído con límites configurables y una segunda copia del panel queda bloqueada.
+- Limitación verificada: La prueba física de expansión requiere que Facebook muestre una publicación con un control accesible etiquetado exactamente `Ver más`; no estaba presente en la pantalla durante esta sesión.
+- Hash resultante de `panel.py`: `7D294E97BA0D2FFBEBC1FF862E732CDB6CC7C27C5A6515D84F671191737FC9B2`.
+- Hash resultante de `LEEME.txt`: `99664D4F648D0B8A6617EA9F85F992944435B0D98AB4B4983F39454763861886`.
+- Commit resultante: El commit Git local que contiene esta entrada.
+- Rollback: `git revert` sobre el commit resultante o restaurar `277edcf`.
+
 ### CHG-20261028-1738 — Ocultar consolas de procesos ADB
 
 - Fecha y hora: 2026-10-28 17:38:07 (America/Mexico_City)
