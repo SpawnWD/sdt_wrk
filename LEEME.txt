@@ -29,7 +29,15 @@ PREPARAR CADA CELULAR (una sola vez)
    Usa un cable que sí transmita datos (algunos solo cargan).
 
 USO DIARIO
-- Marca la casilla de los celulares (o "Seleccionar todos").
+- Los celulares aparecen en una tabla con nombre, modelo, serie, versión de
+  Android, conexión y tarea actual.
+- Selecciona uno o varios renglones. Usa Ctrl o Shift para formar grupos, o
+  pulsa "Seleccionar todos".
+- Para asignar tareas diferentes, selecciona el primer grupo y ejecuta su
+  acción; después selecciona otro grupo y ejecuta otra acción. Las tareas se
+  procesan de forma independiente por dispositivo.
+- "Asignar nombre" conserva un nombre o responsable para reconocer cada
+  número de serie en usos posteriores.
 - "Ver y controlar": abre cada celular marcado en su propia ventana. Las
   ventanas se acomodan solas en cuadrícula para que las veas todas a la
   vez. Manéjalas con mouse y teclado: clic = tocar, rueda = deslizar,
@@ -65,7 +73,8 @@ BUSCAR PUBLICACIONES POR PALABRAS
 3. Escribe palabras o frases separadas por comas o líneas.
 4. Elige el intervalo y el máximo de desplazamientos.
 5. Pulsa "Iniciar búsqueda". El panel revisa únicamente el texto que Android
-   expone en la pantalla visible y desplaza el contenido a intervalos.
+   expone en la pantalla visible de los celulares seleccionados y desplaza el
+   contenido a intervalos.
 6. Al encontrar una coincidencia se detiene para que la revises manualmente.
 7. Para conservar el enlace, en Facebook usa Compartir > Copiar enlace y
    después pulsa "Capturar portapapeles" en el panel.

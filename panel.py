@@ -1,3 +1,5 @@
+import json
+import math
 import os
 import queue
 import re
@@ -7,7 +9,8 @@ import time
 import tkinter as tk
 import unicodedata
 import xml.etree.ElementTree as ET
-from tkinter import filedialog, messagebox, scrolledtext, ttk
+from pathlib import Path
+from tkinter import filedialog, messagebox, scrolledtext, simpledialog, ttk
 from urllib.parse import urlparse
 
 # Intentar importar OpenCV y NumPy para el reconocimiento de formas
@@ -27,15 +30,23 @@ class ProfessionalPhoneController:
         self.root.title(
             "Panel de Control Multi-Dispositivo - Facebook Automation & Vision"
         )
-        self.root.geometry("900x750")
-        self.root.minsize(850, 700)
+        self.root.geometry("1050x850")
+        self.root.minsize(950, 750)
 
         # Detectar la ruta de ADB automáticamente (busca en 'herramientas' o en el sistema)
         self.adb = self.find_adb()
+        self.scrcpy = self.find_scrcpy()
         self.ui_queue = queue.Queue()
         self.search_stop_event = threading.Event()
         self.search_running = False
         self.screen_size_cache = {}
+        self.device_config_file = Path(__file__).resolve().parent / "dispositivos.json"
+        self.device_aliases = self.load_device_aliases()
+        self.device_details = {}
+        self.device_tasks = {}
+        self.scrcpy_processes = {}
+        self.search_devices = []
+        self.first_device_scan = True
         self.root.after(100, self._drain_ui_queue)
         self.root.protocol("WM_DELETE_WINDOW", self.on_close)
 
@@ -100,6 +111,38 @@ class ProfessionalPhoneController:
             
         return "adb"
 
+    def find_scrcpy(self):
+        base_dir = Path(__file__).resolve().parent
+        for candidate in (base_dir / "herramientas").glob("**/scrcpy.exe"):
+            return str(candidate)
+        return None
+
+    def load_device_aliases(self):
+        try:
+            if self.device_config_file.exists():
+                data = json.loads(self.device_config_file.read_text(encoding="utf-8"))
+                if isinstance(data, dict):
+                    return {
+                        str(serial): str(alias).strip()
+                        for serial, alias in data.items()
+                        if str(alias).strip()
+                    }
+        except Exception as error:
+            self.log(f"No se pudieron cargar los nombres de dispositivos: {error}")
+        return {}
+
+    def save_device_aliases(self):
+        try:
+            self.device_config_file.write_text(
+                json.dumps(self.device_aliases, ensure_ascii=False, indent=2),
+                encoding="utf-8",
+            )
+        except Exception as error:
+            messagebox.showerror(
+                "No se pudo guardar",
+                f"No se guardó el nombre del dispositivo:\n{error}",
+            )
+
     def create_general_widgets(self):
         # --- Marco Superior: Dispositivos ---
         dev_frame = ttk.LabelFrame(
@@ -107,31 +150,98 @@ class ProfessionalPhoneController:
         )
         dev_frame.pack(fill="x", padx=10, pady=10)
 
-        btn_scan = ttk.Button(
-            dev_frame,
+        device_toolbar = ttk.Frame(dev_frame)
+        device_toolbar.pack(fill="x", pady=(0, 7))
+
+        ttk.Button(
+            device_toolbar,
             text="Escanear Dispositivos",
             command=self.refresh_devices,
             style="Success.TButton",
-        )
-        btn_scan.pack(side="left", padx=5)
+        ).pack(side="left")
+        ttk.Button(
+            device_toolbar, text="Seleccionar todos", command=self.select_all_devices
+        ).pack(side="left", padx=(7, 0))
+        ttk.Button(
+            device_toolbar, text="Ninguno", command=self.clear_device_selection
+        ).pack(side="left", padx=(7, 0))
+        ttk.Button(
+            device_toolbar, text="Asignar nombre", command=self.rename_selected_device
+        ).pack(side="left", padx=(7, 0))
+        ttk.Button(
+            device_toolbar,
+            text="Ver y controlar",
+            command=self.open_selected_screens,
+            style="Primary.TButton",
+        ).pack(side="left", padx=(18, 0))
+        ttk.Button(
+            device_toolbar,
+            text="Cerrar pantallas",
+            command=self.close_selected_screens,
+        ).pack(side="left", padx=(7, 0))
 
         self.lbl_devices = ttk.Label(
-            dev_frame,
+            device_toolbar,
             text="Dispositivos detectados: 0",
             font=("Segoe UI", 9, "bold"),
         )
-        self.lbl_devices.pack(side="left", padx=15)
+        self.lbl_devices.pack(side="right", padx=5)
 
-        # --- Marco Central: Acciones Masivas (URLs, Facebook y Publicaciones) ---
+        table_frame = ttk.Frame(dev_frame)
+        table_frame.pack(fill="x")
+        columns = ("nombre", "modelo", "serial", "android", "estado", "tarea")
+        self.device_table = ttk.Treeview(
+            table_frame,
+            columns=columns,
+            show="headings",
+            selectmode="extended",
+            height=4,
+        )
+        headings = {
+            "nombre": "Nombre",
+            "modelo": "Modelo",
+            "serial": "Serie",
+            "android": "Android",
+            "estado": "Estado",
+            "tarea": "Tarea actual",
+        }
+        widths = {
+            "nombre": 140,
+            "modelo": 135,
+            "serial": 135,
+            "android": 70,
+            "estado": 95,
+            "tarea": 180,
+        }
+        for column in columns:
+            self.device_table.heading(column, text=headings[column])
+            self.device_table.column(column, width=widths[column], anchor="w")
+        self.device_table.pack(side="left", fill="x", expand=True)
+        device_scroll = ttk.Scrollbar(
+            table_frame, orient="vertical", command=self.device_table.yview
+        )
+        device_scroll.pack(side="right", fill="y")
+        self.device_table.configure(yscrollcommand=device_scroll.set)
+        self.device_table.bind("<<TreeviewSelect>>", self.update_selection_label)
+        self.device_table.bind("<Double-1>", lambda _event: self.rename_selected_device())
+
+        self.lbl_selection = ttk.Label(
+            dev_frame,
+            text="Seleccionados: 0",
+            foreground="#1d5f91",
+            font=("Segoe UI", 9, "bold"),
+        )
+        self.lbl_selection.pack(anchor="w", pady=(6, 0))
+
+        # --- Marco Central: acciones para la selección actual ---
         act_frame = ttk.LabelFrame(
-            self.tab_general, text=" Automatización de Contenido ", padding=10
+            self.tab_general, text=" Tareas para los dispositivos seleccionados ", padding=10
         )
         act_frame.pack(fill="x", padx=10, pady=5)
 
-        # Botón para abrir Facebook en todos los dispositivos conectados
         ttk.Button(
             act_frame,
-            text="Abrir Facebook en Todos",
+            text="Abrir Facebook en seleccionados",
             command=self.open_facebook_all,
             style="Primary.TButton",
         ).pack(anchor="w", padx=5, pady=5)
@@ -148,7 +258,7 @@ class ProfessionalPhoneController:
 
         ttk.Button(
             url_row,
-            text="Abrir en Todos",
+            text="Abrir en seleccionados",
             command=self.open_url_all,
             style="Success.TButton",
         ).pack(side="right")
@@ -165,7 +275,7 @@ class ProfessionalPhoneController:
 
         ttk.Button(
             act_frame,
-            text="Enviar Texto Simultáneo a Todos",
+            text="Enviar texto a seleccionados",
             command=self.publish_text_all,
             style="Success.TButton",
         ).pack(anchor="w", padx=5, pady=5)
@@ -199,7 +309,7 @@ class ProfessionalPhoneController:
                 "Instrucciones:\n1. Coloca imágenes recortadas de las reacciones"
                 " (ej: like.png, love.png, haha.png) en la carpeta 'templates'.\n2."
                 " Selecciona la reacción que deseas buscar y aplicar de forma"
-                " inteligente en todos los dispositivos conectados."
+                " inteligente en los dispositivos seleccionados en la pestaña General."
             ),
             font=("Segoe UI", 9),
         ).pack(anchor="w", pady=5)
@@ -384,7 +494,111 @@ class ProfessionalPhoneController:
 
     def on_close(self):
         self.search_stop_event.set()
+        for process in list(self.scrcpy_processes.values()):
+            try:
+                if process.poll() is None:
+                    process.terminate()
+            except Exception:
+                pass
         self.root.destroy()
+
+    def get_selected_devices(self):
+        if not hasattr(self, "device_table"):
+            return []
+        return [serial for serial in self.device_table.selection() if serial in self.devices]
+
+    def select_all_devices(self):
+        if self.devices:
+            self.device_table.selection_set(self.devices)
+        self.update_selection_label()
+
+    def clear_device_selection(self):
+        self.device_table.selection_remove(self.device_table.selection())
+        self.update_selection_label()
+
+    def update_selection_label(self, _event=None):
+        count = len(self.get_selected_devices())
+        self.lbl_selection.config(
+            text=f"Seleccionados: {count} de {len(self.devices)}"
+        )
+
+    def display_device_name(self, serial):
+        detail = self.device_details.get(serial, {})
+        return self.device_aliases.get(serial) or detail.get("model") or serial
+
+    def rename_selected_device(self):
+        selected = self.get_selected_devices()
+        if len(selected) != 1:
+            messagebox.showwarning(
+                "Selecciona un celular",
+                "Selecciona exactamente un dispositivo para asignarle un nombre.",
+            )
+            return
+        serial = selected[0]
+        current = self.device_aliases.get(serial, "")
+        alias = simpledialog.askstring(
+            "Nombre del dispositivo",
+            "Escribe un nombre o responsable para este celular:",
+            initialvalue=current,
+            parent=self.root,
+        )
+        if alias is None:
+            return
+        alias = alias.strip()
+        if alias:
+            self.device_aliases[serial] = alias
+        else:
+            self.device_aliases.pop(serial, None)
+        self.save_device_aliases()
+        self.update_device_row(serial)
+        self.log(f"Nombre actualizado para [{serial}]: {alias or '(sin alias)'}")
+
+    def query_device_details(self, serial):
+        try:
+            output = self.adb_capture(
+                serial,
+                [
+                    "shell",
+                    "getprop ro.product.model; getprop ro.build.version.release",
+                ],
+                timeout=10,
+            )
+            values = [value.strip() for value in output.splitlines() if value.strip()]
+            return {
+                "model": values[0] if values else "Android",
+                "android": values[1] if len(values) > 1 else "",
+                "state": "Conectado",
+            }
+        except Exception as error:
+            return {"model": "Android", "android": "", "state": f"Error: {error}"}
+
+    def update_device_row(self, serial):
+        if not hasattr(self, "device_table") or not self.device_table.exists(serial):
+            return
+        detail = self.device_details.get(serial, {})
+        self.device_table.item(
+            serial,
+            values=(
+                self.device_aliases.get(serial, ""),
+                detail.get("model", ""),
+                serial,
+                detail.get("android", ""),
+                detail.get("state", "Conectado"),
+                self.device_tasks.get(serial, "Listo"),
+            ),
+        )
+
+    def set_device_task(self, serial, task):
+        self.device_tasks[serial] = task
+        self.post_ui(lambda device=serial: self.update_device_row(device))
+
+    def restore_device_task(self, serial, expected_task, previous_task):
+        if self.device_tasks.get(serial) == expected_task:
+            if previous_task:
+                self.device_tasks[serial] = previous_task
+            else:
+                self.device_tasks.pop(serial, None)
+            self.update_device_row(serial)
 
     def get_devices(self):
         try:
@@ -407,12 +621,29 @@ class ProfessionalPhoneController:
             return []
 
     def refresh_devices(self):
+        previous_selection = set(self.get_selected_devices())
         self.devices = self.get_devices()
+        self.device_details = {
+            serial: self.query_device_details(serial) for serial in self.devices
+        }
+        existing_rows = set(self.device_table.get_children())
+        for serial in existing_rows - set(self.devices):
+            self.device_table.delete(serial)
+            self.device_tasks.pop(serial, None)
+        for serial in self.devices:
+            if not self.device_table.exists(serial):
+                self.device_table.insert("", "end", iid=serial)
+            self.update_device_row(serial)
+
+        selected = [serial for serial in self.devices if serial in previous_selection]
+        if self.first_device_scan and self.devices:
+            selected = list(self.devices)
+        if selected:
+            self.device_table.selection_set(selected)
+        self.first_device_scan = False
         count = len(self.devices)
-        device_names = ", ".join(self.devices) if count > 0 else "Ninguno"
-        self.lbl_devices.config(
-            text=f"Dispositivos detectados: {count} ({device_names})"
-        )
+        self.lbl_devices.config(text=f"Dispositivos detectados: {count}")
+        self.update_selection_label()
         self.log(f"Dispositivos actualizados correctamente. Total: {count}")
 
     def run_on_device(self, device, command, timeout=60):
@@ -447,14 +678,115 @@ class ProfessionalPhoneController:
             raise RuntimeError(detail)
         return result.stdout
 
-    def execute_multithreaded(self, task_func):
-        if not self.devices:
+    def execute_multithreaded(self, task_func, task_name="Tarea", devices=None):
+        target_devices = list(devices if devices is not None else self.get_selected_devices())
+        if not target_devices:
             messagebox.showwarning(
-                "Aviso", "No hay dispositivos conectados. Escanee primero."
+                "Aviso", "Selecciona al menos un dispositivo conectado."
             )
             return
-        for dev in self.devices:
-            threading.Thread(target=task_func, args=(dev,), daemon=True).start()
+
+        def run_task(device):
+            previous_task = self.device_tasks.get(device)
+            self.set_device_task(device, task_name)
+            try:
+                task_func(device)
+            finally:
+                self.post_ui(
+                    lambda dev=device, name=task_name, previous=previous_task: self.restore_device_task(
+                        dev, name, previous
+                    )
+                )
+
+        for dev in target_devices:
+            threading.Thread(target=run_task, args=(dev,), daemon=True).start()
+
+    def open_selected_screens(self):
+        devices = self.get_selected_devices()
+        if not devices:
+            messagebox.showwarning(
+                "Sin selección", "Selecciona al menos un dispositivo para verlo."
+            )
+            return
+        if not self.scrcpy or not Path(self.scrcpy).exists():
+            messagebox.showerror(
+                "Falta scrcpy",
+                "No se encontró scrcpy dentro de la carpeta herramientas.",
+            )
+            return
+
+        screen_width = self.root.winfo_screenwidth()
+        screen_height = self.root.winfo_screenheight()
+        columns = max(1, math.ceil(math.sqrt(len(devices))))
+        rows = max(1, math.ceil(len(devices) / columns))
+        window_width = max(320, screen_width // columns)
+        window_height = max(420, (screen_height - 80) // rows)
+
+        for index, device in enumerate(devices):
+            existing = self.scrcpy_processes.get(device)
+            if existing and existing.poll() is None:
+                self.log(f"La pantalla de [{device}] ya está abierta.")
+                continue
+
+            title = self.display_device_name(device)
+            x = (index % columns) * window_width
+            y = (index // columns) * window_height
+            command = [
+                self.scrcpy,
+                "-s",
+                device,
+                "--window-title",
+                title,
+                "--max-size=900",
+                "--no-audio",
+                "--stay-awake",
+                f"--window-x={x}",
+                f"--window-y={y}",
+                f"--window-width={window_width}",
+                f"--window-height={window_height}",
+            ]
+            try:
+                process = subprocess.Popen(
+                    command,
+                    cwd=str(Path(self.scrcpy).parent),
+                    creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+                )
+                self.scrcpy_processes[device] = process
+                self.set_device_task(device, "Pantalla abierta")
+                self.log(f"Pantalla abierta para [{device}] como '{title}'.")
+                threading.Thread(
+                    target=self.monitor_scrcpy_process,
+                    args=(device, process),
+                    daemon=True,
+                ).start()
+            except Exception as error:
+                self.log(f"No se pudo abrir scrcpy para [{device}]: {error}")
+
+    def monitor_scrcpy_process(self, device, process):
+        process.wait()
+        if self.scrcpy_processes.get(device) is process:
+            self.scrcpy_processes.pop(device, None)
+            self.post_ui(
+                lambda dev=device: self.restore_device_task(
+                    dev, "Pantalla abierta", None
+                )
+            )
+            self.log(f"Pantalla cerrada para [{device}].")
+
+    def close_selected_screens(self):
+        devices = self.get_selected_devices()
+        if not devices:
+            messagebox.showwarning(
+                "Sin selección", "Selecciona los dispositivos cuyas ventanas cerrarás."
+            )
+            return
+        closed = 0
+        for device in devices:
+            process = self.scrcpy_processes.get(device)
+            if process and process.poll() is None:
+                process.terminate()
+                closed += 1
+        self.log(f"Se solicitó cerrar {closed} ventana(s) de dispositivo.")
 
     @staticmethod
     def normalize_search_text(value):
@@ -569,17 +901,19 @@ class ProfessionalPhoneController:
             )
             return
 
-        devices = self.get_devices()
-        self.devices = devices
+        selected_devices = self.get_selected_devices()
+        connected_devices = set(self.get_devices())
+        devices = [device for device in selected_devices if device in connected_devices]
         if not devices:
             messagebox.showwarning(
-                "Sin dispositivos",
-                "No hay celulares autorizados. Conecta uno y vuelve a intentar.",
+                "Sin dispositivos seleccionados",
+                "Selecciona al menos un celular autorizado y vuelve a intentar.",
             )
             return
 
         self.search_stop_event.clear()
         self.screen_size_cache.clear()
+        self.search_devices = list(devices)
         self.search_running = True
         self.btn_start_search.config(state="disabled")
         self.btn_stop_search.config(state="normal")
@@ -591,6 +925,8 @@ class ProfessionalPhoneController:
         self.log(
             f"Búsqueda por palabras iniciada en {len(devices)} dispositivo(s)."
         )
+        for device in devices:
+            self.set_device_task(device, "Búsqueda por palabras")
 
         threading.Thread(
             target=self.keyword_search_worker,
@@ -695,6 +1031,9 @@ class ProfessionalPhoneController:
         self.btn_start_search.config(state="normal")
         self.btn_stop_search.config(state="disabled")
         self.search_running = False
+        for device in self.search_devices:
+            self.restore_device_task(device, "Búsqueda por palabras", None)
+        self.search_devices = []
 
     def capture_link_from_clipboard(self):
         try:
@@ -729,14 +1068,17 @@ class ProfessionalPhoneController:
         self.log("Enlace de publicación capturado desde el portapapeles.")
 
     def open_facebook_all(self):
-        self.log("Abriendo Facebook en todos los dispositivos...")
+        self.log("Abriendo Facebook en los dispositivos seleccionados...")
 
         def task(dev):
             opened = False
             for pkg in ["com.facebook.katana", "com.facebook.lite"]:
                 res = subprocess.run(
                     [self.adb, "-s", dev, "shell", "monkey", "-p", pkg, "-c", "android.intent.category.LAUNCHER", "1"],
-                    capture_output=True, text=True
+                    capture_output=True,
+                    text=True,
+                    encoding="utf-8",
+                    errors="replace",
                 )
                 if "No activities found" not in res.stdout and "Error" not in res.stdout and res.returncode == 0:
                     opened = True
@@ -746,7 +1088,7 @@ class ProfessionalPhoneController:
             else:
                 self.log(f"-> [{dev}] No se pudo abrir Facebook o no está instalada.")
 
-        self.execute_multithreaded(task)
+        self.execute_multithreaded(task, "Abrir Facebook")
 
     def open_url_all(self):
         url = self.entry_url.get().strip()
@@ -756,13 +1098,16 @@ class ProfessionalPhoneController:
         self.log(f"Abriendo URL en paralelo: {url}")
 
         def task(dev):
-            self.run_on_device(
+            ok, detail = self.run_on_device(
                 dev,
                 ["shell", "am", "start", "-a", "android.intent.action.VIEW", "-d", url],
             )
-            self.log(f"-> URL abierta en dispositivo: {dev}")
+            if ok:
+                self.log(f"-> URL abierta en dispositivo: {dev}")
+            else:
+                self.log(f"-> No se abrió la URL en [{dev}]: {detail}")
 
-        self.execute_multithreaded(task)
+        self.execute_multithreaded(task, "Abrir enlace")
 
     def publish_text_all(self):
         text = self.text_post.get("1.0", tk.END).strip()
@@ -774,11 +1119,16 @@ class ProfessionalPhoneController:
         def task(dev):
             for line in text.split("\n"):
                 formatted_line = line.replace(" ", "%s").replace("&", "\\&")
-                self.run_on_device(dev, ["shell", "input", "text", formatted_line])
+                ok, detail = self.run_on_device(
+                    dev, ["shell", "input", "text", formatted_line]
+                )
+                if not ok:
+                    self.log(f"-> Error enviando texto a [{dev}]: {detail}")
+                    return
                 self.run_on_device(dev, ["shell", "input", "keyevent", "66"])
-            self.log(f"-> Texto enviado a dispositivo: {dev}")
+            self.log(f"-> Texto enviado al dispositivo: {dev}")
 
-        self.execute_multithreaded(task)
+        self.execute_multithreaded(task, "Enviar texto")
 
     def execute_vision_reaction(self, template_filename):
         template_path = os.path.join("templates", template_filename)
@@ -844,7 +1194,7 @@ class ProfessionalPhoneController:
             except Exception as e:
                 self.log(f"Error en procesamiento visual para [{dev}]: {e}")
 
-        self.execute_multithreaded(task)
+        self.execute_multithreaded(task, f"Reacción visual: {template_filename}")
 
 
 if __name__ == "__main__":

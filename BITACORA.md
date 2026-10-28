@@ -17,6 +17,56 @@ Esta bitácora registra el estado base del proyecto y todos los cambios que se r
 
 ## Cambios completados
 
+### CHG-20261028-1125 — Administración simultánea de varios teléfonos
+
+- Fecha y hora: 2026-10-28 11:25:42 (America/Mexico_City)
+- Tipo: Funcionalidad y arquitectura
+- Estado: Completado el 2026-10-28 11:29:32 (America/Mexico_City)
+- Responsable: Codex, bajo solicitud del propietario
+- Solicitud: Administrar varios teléfonos simultáneamente, verlos y asignar procesos o tareas diferentes.
+- Objetivo:
+  - Mostrar los dispositivos en una tabla con selección múltiple.
+  - Conservar nombres personalizados por número de serie.
+  - Ejecutar acciones únicamente sobre los equipos seleccionados.
+  - Abrir y cerrar pantallas independientes mediante scrcpy.
+  - Mostrar la tarea actual de cada dispositivo.
+  - Permitir seleccionar distintos grupos y asignar tareas diferentes de manera simultánea.
+- Archivos modificados: `panel.py`, `LEEME.txt`, `.gitignore` y `BITACORA.md`.
+- Datos locales previstos: `dispositivos.json`, excluido de Git por contener nombres definidos por el operador.
+- Autoría y compatibilidad: Se preservarán las funciones existentes y se agregarán controles alrededor de ellas; no se reclamará autoría sobre el código original.
+- Riesgos:
+  - Una desconexión durante una tarea debe afectar sólo al dispositivo correspondiente.
+  - Varias ventanas scrcpy pueden consumir memoria y procesador.
+  - La selección debe conservarse al actualizar sin ejecutar acciones sobre equipos no elegidos.
+- Referencia de rollback: Commit anterior `1370416`.
+- Implementación:
+  - Tabla multi-selección con nombre, modelo, serie, Android, conexión y tarea actual.
+  - Selección de todos, limpieza de selección y nombres persistentes por serie.
+  - Todas las acciones generales, búsqueda y visión limitadas a los equipos seleccionados.
+  - Ejecución independiente por dispositivo mediante hilos de trabajo.
+  - Apertura de scrcpy por equipo, organización automática en cuadrícula y cierre desde el panel.
+  - Restauración del estado de tarea cuando termina una operación.
+  - Cierre controlado de las ventanas scrcpy al salir.
+  - Exclusión de `dispositivos.json` del repositorio local.
+- Pruebas realizadas:
+  - Sintaxis e importación de `panel.py`.
+  - Validación de todas las opciones scrcpy utilizadas.
+  - Carga real del Moto E6 Play con modelo, Android 9 y estado conectado.
+  - Selección inicial y lectura de filas en la tabla.
+  - Simulación de dos dispositivos con tareas independientes y concurrentes.
+  - Persistencia aislada de nombres en JSON.
+  - Apertura real de scrcpy para `ZE222HSLC9`, comprobación del proceso y cierre controlado.
+  - Arranque del panel actualizado y comprobación de proceso responsivo.
+- Resultado: Correcto para las pruebas disponibles.
+- Limitación de validación: Sólo había un teléfono físico conectado. La coordinación de dos teléfonos se validó con dispositivos simulados; debe repetirse una prueba física cuando haya dos o más equipos disponibles.
+- Hashes resultantes:
+  - `panel.py`: `F0AAAC19E75B03131158CB7CFF8787D41D5F512E1FA8CE9AE787A4A4CC7AEAB1`
+  - `LEEME.txt`: `EB26F395A003C8AB809C445081FCFCFA4DD981E9C4405B33D1954B942B8C958C`
+  - `.gitignore`: `2506FE8D9306FE0430FDDDC9C8D07C9656A492A4FC2AD4CBD18934C21A89264A`
+- Commit resultante: El commit Git local que contiene esta entrada.
+- Rollback: `git revert` sobre el commit resultante o restaurar el commit anterior `1370416`.
+- Observaciones: Se preservaron el título, las funciones existentes y la autoría del proyecto original.
+
 ### CHG-20261028-0620 — Optimización de velocidad del scroll
 
 - Fecha y hora: 2026-10-28 06:20:31 (America/Mexico_City)
