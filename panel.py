@@ -13,6 +13,8 @@ from pathlib import Path
 from tkinter import filedialog, messagebox, scrolledtext, simpledialog, ttk
 from urllib.parse import urlparse
 
+NO_WINDOW = getattr(subprocess, "CREATE_NO_WINDOW", 0) if os.name == "nt" else 0
+
 # Intentar importar OpenCV y NumPy para el reconocimiento de formas
 try:
     import cv2
@@ -609,6 +611,7 @@ class ProfessionalPhoneController:
                 encoding="utf-8",
                 errors="replace",
                 check=True,
+                creationflags=NO_WINDOW,
             )
             lines = result.stdout.strip().split("\n")[1:]
             devices = []
@@ -657,6 +660,7 @@ class ProfessionalPhoneController:
                 errors="replace",
                 check=True,
                 timeout=timeout,
+                creationflags=NO_WINDOW,
             )
             return True, result.stdout.strip()
         except Exception as e:
@@ -672,6 +676,7 @@ class ProfessionalPhoneController:
             encoding="utf-8",
             errors="replace",
             timeout=timeout,
+            creationflags=NO_WINDOW,
         )
         if result.returncode != 0:
             detail = (result.stderr or result.stdout or "Error ADB").strip()
@@ -749,7 +754,7 @@ class ProfessionalPhoneController:
                 process = subprocess.Popen(
                     command,
                     cwd=str(Path(self.scrcpy).parent),
-                    creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+                    creationflags=NO_WINDOW,
                 )
                 self.scrcpy_processes[device] = process
                 self.set_device_task(device, "Pantalla abierta")
@@ -1079,6 +1084,7 @@ class ProfessionalPhoneController:
                     text=True,
                     encoding="utf-8",
                     errors="replace",
+                    creationflags=NO_WINDOW,
                 )
                 if "No activities found" not in res.stdout and "Error" not in res.stdout and res.returncode == 0:
                     opened = True
@@ -1151,6 +1157,7 @@ class ProfessionalPhoneController:
                 result = subprocess.run(
                     [self.adb, "-s", dev, "exec-out", "screencap", "-p"],
                     stdout=subprocess.PIPE,
+                    creationflags=NO_WINDOW,
                 )
                 screen_bytes = result.stdout
                 if not screen_bytes:

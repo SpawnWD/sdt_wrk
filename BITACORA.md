@@ -17,6 +17,29 @@ Esta bitácora registra el estado base del proyecto y todos los cambios que se r
 
 ## Cambios completados
 
+### CHG-20261028-1738 — Ocultar consolas de procesos ADB
+
+- Fecha y hora: 2026-10-28 17:38:07 (America/Mexico_City)
+- Tipo: Corrección de experiencia de uso
+- Estado: Completado el 2026-10-28 17:38:47 (America/Mexico_City)
+- Responsable: Codex, bajo solicitud del propietario
+- Problema: Durante el uso del panel aparecen varias ventanas negras de consola al ejecutar ADB y otras herramientas auxiliares.
+- Causa: El panel se ejecuta con `pythonw.exe`, pero las llamadas a programas de consola no solicitan explícitamente el modo sin ventana de Windows.
+- Cambio propuesto: Aplicar `CREATE_NO_WINDOW` a todos los procesos ADB y scrcpy iniciados por el panel.
+- Alcance: Sólo presentación de procesos; no cambia comandos, tareas ni comportamiento de los celulares.
+- Archivos modificados: `panel.py` y `BITACORA.md`.
+- Referencia de rollback: Commit anterior `b938492`.
+- Implementación: Se definió una bandera común `NO_WINDOW` y se aplicó a las seis llamadas `subprocess.run` o `subprocess.Popen` utilizadas para ADB y scrcpy.
+- Pruebas realizadas:
+  - Validación de sintaxis mediante AST.
+  - Inspección automática para confirmar que todas las llamadas a subprocesos incluyen `creationflags`.
+  - Cinco escaneos consecutivos del dispositivo desde una instancia de Tkinter.
+  - Comprobación de procesos de consola después de la prueba; no quedaron nuevas ventanas o procesos persistentes.
+- Resultado: Correcto. Los procesos auxiliares se ejecutan sin crear ventanas de consola visibles.
+- Hash resultante de `panel.py`: `0A071EBB100DFC1C7FA4D50A562CC36FBBA14350CFABB911CC36F1094F92353B`.
+- Commit resultante: El commit Git local que contiene esta entrada.
+- Rollback: `git revert` sobre el commit resultante o restaurar `b938492`.
+
 ### CHG-20261028-1125 — Administración simultánea de varios teléfonos
 
 - Fecha y hora: 2026-10-28 11:25:42 (America/Mexico_City)
