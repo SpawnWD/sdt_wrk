@@ -1,0 +1,87 @@
+﻿PANEL DE CELULARES
+Ver, manejar y enviar fotos/videos a varios Android por USB desde Windows.
+
+INSTALAR (una sola vez)
+1. Descomprime esta carpeta donde quieras (por ejemplo, en Documentos).
+   Ojo: descomprímela, no la abras desde dentro del .zip.
+2. Doble clic en "Abrir Panel.bat".
+3. La primera vez te pedirá descargar scrcpy (gratuito, código abierto,
+   ~12 MB) desde su página oficial. El panel verifica la huella de
+   seguridad del archivo antes de usarlo. Necesita internet solo esa vez.
+   Si Windows muestra "Windows protegió su PC", pulsa "Más información"
+   y luego "Ejecutar de todas formas".
+
+SI NO ABRE
+- Doble clic en "Diagnostico.bat". Crea el archivo "diagnostico.txt";
+  envíalo (o una captura) para revisarlo.
+- Revisa que hayas descomprimido el ZIP completo (no abrirlo por dentro).
+- Si sale un error, se guarda en "registro_errores.txt" dentro de la
+  carpeta. Manda ese archivo o una captura para revisarlo.
+- Cierra otros programas de celulares (Smart Switch, HiSuite, Mi PC Suite)
+  porque pueden ocupar la conexión USB.
+
+PREPARAR CADA CELULAR (una sola vez)
+1. Ajustes > Acerca del teléfono > toca 7 veces "Número de compilación".
+2. Ajustes > Sistema > Opciones de desarrollador > activa "Depuración USB".
+   En Xiaomi/Redmi activa también "Depuración USB (ajustes de seguridad)".
+3. Conecta el cable USB. En el celular aparece "¿Permitir depuración USB?":
+   marca "Permitir siempre desde esta computadora" y acepta.
+   Usa un cable que sí transmita datos (algunos solo cargan).
+
+USO DIARIO
+- Marca la casilla de los celulares (o "Seleccionar todos").
+- "Ver y controlar": abre cada celular marcado en su propia ventana. Las
+  ventanas se acomodan solas en cuadrícula para que las veas todas a la
+  vez. Manéjalas con mouse y teclado: clic = tocar, rueda = deslizar,
+  clic derecho = regresar.
+- "Abrir Facebook": abre Facebook en todos los celulares marcados.
+- "Enviar fotos y videos": elige archivos de la PC y se copian a todos
+  los celulares marcados, en la galería, álbum "PanelPC". Al publicar
+  en Facebook, elige la foto o el video desde ese álbum.
+- También puedes arrastrar un archivo a la ventana de un celular; se
+  guarda en su carpeta Descargas.
+- "Ponerle nombre": dale a cada celular un nombre fácil de reconocer.
+- "Modo ligero" (activado de inicio): las ventanas usan menos memoria y
+  procesador. Desmárcalo solo si necesitas ver la pantalla más nítida.
+- "Cerrar ventanas": cierra las ventanas de los celulares marcados (o
+  todas si no hay ninguno marcado) para liberar memoria.
+
+PUBLICAR TEXTO EN FACEBOOK
+1. Abre los celulares con "Ver y controlar" y abre Facebook.
+2. En la ventana de cada celular toca "¿Qué estás pensando?" (o el
+   cuadro de comentario) para que quede listo para escribir.
+3. Escribe el texto abajo a la izquierda. Acentos, ñ y emojis funcionan.
+4. Marca los celulares y pulsa "Pegar en los celulares marcados".
+   El texto aparece en Facebook en todos.
+5. Revisa cada uno y toca PUBLICAR. Ese último paso siempre lo haces tú.
+- "Solo copiar" deja el texto listo para pegarlo tú con Ctrl+V.
+- Los textos que usas seguido guárdalos con "Guardar plantilla".
+- Mientras pega, no muevas el mouse ni escribas (tarda 1 segundo por
+  celular).
+
+ABRIR UNA PUBLICACIÓN
+1. En Facebook, en la publicación, toca Compartir > "Copiar enlace".
+2. Pégalo en "Link de publicación" (arriba en el panel).
+3. Haz clic sobre el renglón del celular donde la quieres abrir.
+4. Pulsa "Abrir en el celular seleccionado". Se abre en la app de
+   Facebook de ese celular (o en el navegador si no tiene la app).
+Se abre en un celular a la vez; queda registrado en la bitácora.
+
+BITÁCORA
+- Abajo a la derecha ves todo lo que pasa hoy: celulares que se
+  conectan o desconectan, ventanas abiertas, apps, archivos enviados,
+  textos copiados y plantillas.
+- Todo se guarda en "bitacora.csv" con fecha, hora y usuario de
+  Windows. "Abrir bitácora completa" la abre en Excel.
+- Si la tienes abierta en Excel, ciérrala para que se sigan guardando
+  los registros nuevos.
+- Si al escribir directo en la ventana no sale un acento o la ñ, usa
+  "Texto para publicar" y pega con Ctrl+V.
+
+SEGURIDAD
+- Solo funciona por cable USB. No abre conexiones por Wi-Fi ni internet,
+  y no envía tus datos a ningún lado.
+- Al cerrar el panel se cierran todas las conexiones con los celulares.
+- Si dejas de usar esta computadora o la prestas: en cada celular ve a
+  Opciones de desarrollador > "Revocar autorizaciones de depuración USB".
+- Puedes desactivar la "Depuración USB" cuando no uses el panel.

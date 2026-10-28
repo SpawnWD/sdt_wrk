@@ -1,0 +1,12 @@
+__pycache__/
+*.py[cod]
+*.tmp
+*.log
+registro_inicio.txt
+registro_errores.txt
+bitacora_operativa.db
+bitacora_operativa.db-wal
+bitacora_operativa.db-shm
+
+# Herramientas de terceros descargadas; se reinstalan o restauran por separado.
+herramientas/
