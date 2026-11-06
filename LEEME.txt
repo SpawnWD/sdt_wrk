@@ -1,123 +1,79 @@
-﻿PANEL DE CELULARES
-Ver, manejar y enviar fotos/videos a varios Android por USB desde Windows.
+PANEL DE CELULARES V2
+Control y automatización de dispositivos Android por USB desde Windows.
 
-INSTALAR (una sola vez)
-1. Descomprime esta carpeta donde quieras (por ejemplo, en Documentos).
-   Ojo: descomprímela, no la abras desde dentro del .zip.
-2. Doble clic en "Abrir Panel.bat".
-3. La primera vez te pedirá descargar scrcpy (gratuito, código abierto,
-   ~12 MB) desde su página oficial. El panel verifica la huella de
-   seguridad del archivo antes de usarlo. Necesita internet solo esa vez.
-   Si Windows muestra "Windows protegió su PC", pulsa "Más información"
-   y luego "Ejecutar de todas formas".
+INSTALACIÓN Y PREPARACIÓN
+1. Descomprime esta carpeta en tu PC (no la abras desde dentro del .zip).
+2. Asegúrate de tener Python 3 instalado.
+3. Ejecuta "Abrir Panel.bat".
+4. En cada celular:
+   - Activa Opciones de desarrollador (tocando 7 veces "Número de compilación").
+   - Activa "Depuración USB".
+   - Conecta el cable USB de datos y acepta "Permitir siempre desde esta computadora".
 
-SI NO ABRE
-- Doble clic en "Diagnostico.bat". Crea el archivo "diagnostico.txt";
-  envíalo (o una captura) para revisarlo.
-- Revisa que hayas descomprimido el ZIP completo (no abrirlo por dentro).
-- Si sale un error, se guarda en "registro_errores.txt" dentro de la
-  carpeta. Manda ese archivo o una captura para revisarlo.
-- Cierra otros programas de celulares (Smart Switch, HiSuite, Mi PC Suite)
-  porque pueden ocupar la conexión USB.
+USO GENERAL
+- El panel detecta automáticamente los celulares conectados (escaneo en segundo plano).
+- Los dispositivos aparecen en una tabla con su información y estado actual.
+- Usa "Asignar nombre" para guardar un identificador (ej. nombre del responsable) que se recordará por número de serie.
+- Selecciona uno o varios equipos de la tabla para enviarles comandos.
+- "Ver y controlar": Abre cada celular en su propia ventana usando scrcpy. Las ventanas se acomodan automáticamente en cuadrícula.
+- "Cerrar pantallas": Cierra las ventanas scrcpy de los equipos seleccionados.
+- "Abrir Facebook": Inicia la aplicación de Facebook en los seleccionados.
+- "Abrir Link / URL": Abre el enlace especificado directamente en la app correspondiente de los celulares seleccionados.
 
-PREPARAR CADA CELULAR (una sola vez)
-1. Ajustes > Acerca del teléfono > toca 7 veces "Número de compilación".
-2. Ajustes > Sistema > Opciones de desarrollador > activa "Depuración USB".
-   En Xiaomi/Redmi activa también "Depuración USB (ajustes de seguridad)".
-3. Conecta el cable USB. En el celular aparece "¿Permitir depuración USB?":
-   marca "Permitir siempre desde esta computadora" y acepta.
-   Usa un cable que sí transmita datos (algunos solo cargan).
+PUBLICACIÓN DE TEXTO
+1. Escribe el texto en el cuadro de la pestaña general.
+2. Abre las pantallas y asegúrate de que el cursor esté activo en la caja de texto (ej. "¿Qué estás pensando?").
+3. Pulsa "Enviar texto a seleccionados".
+   * Nota: El envío usa métodos seguros en Base64 para evitar inyecciones en el shell de Android.
 
-USO DIARIO
-- El panel permite una sola instancia activa. Si intentas abrirlo otra vez,
-  mostrará un aviso en lugar de duplicar controles o tareas.
-- Los celulares aparecen en una tabla con nombre, modelo, serie, versión de
-  Android, conexión y tarea actual.
-- Selecciona uno o varios renglones. Usa Ctrl o Shift para formar grupos, o
-  pulsa "Seleccionar todos".
-- Para asignar tareas diferentes, selecciona el primer grupo y ejecuta su
-  acción; después selecciona otro grupo y ejecuta otra acción. Las tareas se
-  procesan de forma independiente por dispositivo.
-- "Asignar nombre" conserva un nombre o responsable para reconocer cada
-  número de serie en usos posteriores.
-- "Ver y controlar": abre cada celular marcado en su propia ventana. Las
-  ventanas se acomodan solas en cuadrícula para que las veas todas a la
-  vez. Manéjalas con mouse y teclado: clic = tocar, rueda = deslizar,
-  clic derecho = regresar.
-- "Abrir Facebook": abre Facebook en todos los celulares marcados.
-- "Enviar fotos y videos": elige archivos de la PC y se copian a todos
-  los celulares marcados, en la galería, álbum "PanelPC". Al publicar
-  en Facebook, elige la foto o el video desde ese álbum.
-- También puedes arrastrar un archivo a la ventana de un celular; se
-  guarda en su carpeta Descargas.
-- "Ponerle nombre": dale a cada celular un nombre fácil de reconocer.
-- "Modo ligero" (activado de inicio): las ventanas usan menos memoria y
-  procesador. Desmárcalo solo si necesitas ver la pantalla más nítida.
-- "Cerrar ventanas": cierra las ventanas de los celulares marcados (o
-  todas si no hay ninguno marcado) para liberar memoria.
+BÚSQUEDA ASISTIDA POR PALABRAS (ESCUCHA SOCIAL / MONITOREO)
+Esta función permite revisar el contenido visible en pantalla sin interactuar a ciegas.
+1. Abre Facebook en los celulares y ve a la sección deseada.
+2. En la pestaña "Búsqueda (Escucha)", ingresa palabras o frases separadas por comas. Cada elemento se evalúa como una alternativa: basta que coincida uno.
+3. Opcionalmente marca `Me gusta`, `Comentario` o ambas acciones. Para Comentario, escribe el texto correspondiente; ambas opciones están desactivadas inicialmente.
+4. Configura el tiempo mínimo y máximo antes de ejecutar las acciones dentro de una publicación coincidente.
+5. El panel analiza el texto por accesibilidad. Si Facebook Lite no expone texto, utiliza el OCR local de Windows en español; las capturas temporales se eliminan después de cada lectura.
+6. Antes de buscar, localiza `… Ver más` dentro del cuerpo de las publicaciones visibles, lo pulsa y vuelve a leer la pantalla ya expandida. Excluye `Ver más comentarios`, respuestas, grupos, personas y traducciones.
+7. Las publicaciones cuyo encabezado muestre `Publicidad`, `Patrocinado`, `Sponsored`, `Anuncio` o `Advertisement` se ignoran por completo: no se expande su `Ver más`, no se buscan palabras, no se entra y no se ejecutan acciones. La protección permanece durante los dos desplazamientos siguientes para impedir que el cuerpo del anuncio se evalúe cuando su rótulo ya salió de pantalla.
+8. Si el cuadro no contiene comas, todo lo escrito se exige como una sola frase completa, con sus límites de palabra. Las comas separan búsquedas independientes: `huauchinango, xicotepec` busca cualquiera de esos dos términos, mientras que `huauchinango se llena` exige esa frase completa.
+9. El desplazamiento automático usa un gesto breve y amplio para evitar que Facebook confunda el final del scroll con un toque sobre una tarjeta. Si aun así Facebook abre una publicación sin una coincidencia validada, el panel la reconoce, regresa al feed y no ejecuta Me gusta ni Comentario.
+10. Puede expandir hasta tres controles por pantalla y vuelve a calcular su posición después de cada toque para no usar coordenadas obsoletas.
+11. La coincidencia se asocia con la fecha/hora pequeña de la misma publicación, por ejemplo `9 h ·` junto al icono de audiencia. Si OCR omite esa línea, utiliza la geometría validada del encabezado; si tampoco existe, no entra ni pulsa otro bloque por aproximación.
+12. En republicaciones, la fecha puede compartir renglón con el nombre de la página, por ejemplo `Canal 19 · 5 h ·`. El panel calcula los límites de las palabras `5 h` y pulsa sólo ese segmento para no abrir el perfil de la página.
+13. El panel pulsa la fecha/hora validada para abrir la publicación. Dentro reutiliza la detección de Me gusta, el comentario verificado y la flecha azul de envío.
+14. En publicaciones compartidas, el editor puede cambiar a `Comenta como…`. El panel admite `MultiAutoCompleteTextView` y, si Facebook cambia nuevamente el texto, calcula una caja horizontal inferior de altura media y pulsa su centro respecto al ancho de pantalla.
+15. Al terminar regresa al feed y continúa el scroll hasta pulsar `Detener`, si está marcada la búsqueda continua.
+16. Después de enviar, Búsqueda localiza el texto esperado en toda la sección visible de comentarios situada por encima de `Escribe un comentario` o `Comenta como`. Cuando aparece `Más relevantes`, `Más recientes` o `Todos los comentarios`, esa línea marca el inicio real de la zona aunque esté en la parte superior de la pantalla.
+17. La confirmación combina varias líneas, admite diferencias OCR pequeñas y también acepta el aviso `Se publicó tu comentario`; evita confundir el resultado con el cuerpo principal de la publicación.
+18. Se realizan hasta cinco comprobaciones y una última validación tardía antes de autorizar el único reintento. Si tampoco aparece después del reintento, el panel sale de la publicación y continúa el scroll sin detener toda la búsqueda.
 
-PUBLICAR TEXTO EN FACEBOOK
-1. Abre los celulares con "Ver y controlar" y abre Facebook.
-2. En la ventana de cada celular toca "¿Qué estás pensando?" (o el
-   cuadro de comentario) para que quede listo para escribir.
-3. Escribe el texto abajo a la izquierda. Acentos, ñ y emojis funcionan.
-4. Marca los celulares y pulsa "Pegar en los celulares marcados".
-   El texto aparece en Facebook en todos.
-5. Revisa cada uno y toca PUBLICAR. Ese último paso siempre lo haces tú.
-- "Solo copiar" deja el texto listo para pegarlo tú con Ctrl+V.
-- Los textos que usas seguido guárdalos con "Guardar plantilla".
-- Mientras pega, no muevas el mouse ni escribas (tarda 1 segundo por
-  celular).
+ACCIONES SOBRE UNA PUBLICACIÓN
+- Marca `Me gusta`, `Comentario` o ambas casillas y pulsa `Ejecutar acciones seleccionadas`. Cuando ambas están activas, el panel completa primero Me gusta y después Comentario usando la misma URL y los mismos teléfonos seleccionados.
+- Para enlaces `facebook.com/reel/...`, marca también la casilla `Reel`. En este modo el panel identifica la columna lateral del video: el primer control es Me gusta y el segundo abre Comentarios.
+- La casilla `Reel` está desactivada inicialmente. Si no se marca, las publicaciones, fotos y videos normales conservan exactamente su búsqueda anterior por accesibilidad, figura y desplazamiento.
+- En Reel no se desplaza la publicación para buscar la fila de acciones: se valida la estructura lateral y, si Android no la describe, se reconocen las dos primeras siluetas de acción en el costado derecho.
+- Al abrir Comentarios desde un Reel, se reutilizan la escritura verificada y la flecha azul de envío del modo normal.
+- En modo Reel, la flecha azul se valida y se pulsa aunque `Clic calculado por figura` esté desactivado. Si Facebook tarda en dibujarla, el panel realiza hasta tres comprobaciones breves antes de detenerse.
+- `Detener proceso` cancela la acción actual y evita iniciar una segunda acción que estuviera pendiente.
+- El botón "Detener proceso" cancela la interacción activa de Me gusta o Comentario sin cerrar el panel. Interrumpe las esperas, el calentamiento y los desplazamientos, y se deshabilita cuando no hay un proceso activo.
+- En Interacciones, activa "Clic calculado por figura" para que el panel reconozca la silueta de la manita y el globo de comentario mediante bordes y escala, en lugar de depender de una posición absoluta. El número de desplazamientos de búsqueda es configurable.
+- "Solo Me gusta" analiza la publicación al abrirla y repite el análisis después de cada desplazamiento configurado. Acepta el rótulo exacto aunque Facebook Lite lo exponga dentro de un elemento hijo; si aparece "Quitar Me gusta", no vuelve a tocarlo.
+- Con clic calculado, "Solo Me gusta" utiliza desplazamientos largos de aproximadamente 48% de la pantalla y vuelve a analizar después de cada uno hasta localizar la figura. Si la figura aparece azul, la considera activa y no vuelve a pulsarla.
+- Cuando Android no expone ese control, puede utilizar la plantilla visual like.png como respaldo. Ya no se pulsa una coordenada fija.
+- "Solo comentario" busca el campo accesible "Escribe un comentario" / "Write a comment" al abrir y después de cada desplazamiento configurado. Acepta esos rótulos exactos y el botón exacto de publicación aunque Facebook Lite los exponga como elementos hijos; no usa coordenadas fijas como respaldo.
+- También acepta `Comenta como…`, `Comment as…`, `MultiAutoCompleteTextView` y un respaldo geométrico inferior centrado para publicaciones compartidas o republicadas.
+- Si el campo todavía no aparece, el clic calculado localiza y pulsa el globo de comentario; después busca un campo EditText real en la zona inferior de la pantalla.
+- Antes de pulsar Publicar, el panel comprueba que el texto completo aparezca en la interfaz. Después registra si el cambio de pantalla permite confirmar el envío.
+- Para texto ASCII, el panel usa directamente `adb shell input text` sobre el campo enfocado. Si el texto no aparece completo, limpia el borrador y no intenta enviarlo.
+- Antes de escribir, el panel limpia cualquier borrador anterior para no concatenar comentarios.
+- Si Facebook muestra una flecha azul sin nombre accesible, el clic calculado identifica un componente azul pequeño en el extremo derecho del editor, tanto con teclado abierto como cerrado, y lo pulsa únicamente después de verificar el texto.
+- Cuando Facebook no expone el contenido del editor a accesibilidad, la flecha azul activa sirve como verificación visual de que el campo contiene texto. Después del toque, su desaparición confirma que el editor se vació.
+- Si el texto permanece después del toque, el panel informa que el envío no fue confirmado y deja la publicación abierta para revisión; no regresa automáticamente al feed.
+- Para comentarios con acentos, eñes, emojis u otros caracteres Unicode se requiere ADB Keyboard (com.android.adbkeyboard). Si no está disponible, el panel cancela la publicación para no enviar texto incompleto.
+- Un teléfono ocupado por una búsqueda, un Me gusta o un comentario no puede ser tomado al mismo tiempo por otra de esas tareas.
 
-BUSCAR PUBLICACIONES POR PALABRAS
-1. Abre Facebook y deja visible el inicio o la sección que quieras revisar.
-2. En el panel abre la pestaña "Búsqueda por Palabras".
-3. Escribe palabras o frases separadas por comas o líneas.
-4. Elige el intervalo y el máximo de desplazamientos.
-5. Deja marcada "Expandir Ver más" si quieres que el panel despliegue el
-   texto contraído antes de descartar una publicación. También puedes elegir
-   el máximo de expansiones por pantalla y la espera después de cada toque.
-6. Pulsa "Iniciar búsqueda". El panel revisa únicamente el texto que Android
-   expone en la pantalla visible de los celulares seleccionados y desplaza el
-   contenido a intervalos.
-7. Al encontrar una coincidencia se detiene para que la revises manualmente.
-8. Para conservar el enlace, en Facebook usa Compartir > Copiar enlace y
-   después pulsa "Capturar portapapeles" en el panel.
-- Puedes detener la búsqueda en cualquier momento.
-- El intervalo predeterminado es 1 segundo y acepta valores desde 0.5. El
-  análisis de accesibilidad del celular puede tardar más que el intervalo;
-  en ese caso el siguiente ciclo comienza en cuanto termina el análisis.
-- La búsqueda tiene un límite; no funciona de forma indefinida.
-- La expansión acepta únicamente controles cuya etiqueta accesible sea
-  exactamente "Ver más" o "See more". No toca "Ver más comentarios",
-  "Ver respuestas" ni etiquetas parciales.
-- Facebook puede no exponer todo el texto mediante la accesibilidad de
-  Android. Una publicación visible podría no ser detectada.
-- Esta función no reacciona, comenta, comparte ni publica automáticamente.
-
-ABRIR UNA PUBLICACIÓN
-1. En Facebook, en la publicación, toca Compartir > "Copiar enlace".
-2. Pégalo en "Link de publicación" (arriba en el panel).
-3. Haz clic sobre el renglón del celular donde la quieres abrir.
-4. Pulsa "Abrir en el celular seleccionado". Se abre en la app de
-   Facebook de ese celular (o en el navegador si no tiene la app).
-Se abre en un celular a la vez; queda registrado en la bitácora.
-
-BITÁCORA
-- Abajo a la derecha ves todo lo que pasa hoy: celulares que se
-  conectan o desconectan, ventanas abiertas, apps, archivos enviados,
-  textos copiados y plantillas.
-- Todo se guarda en "bitacora.csv" con fecha, hora y usuario de
-  Windows. "Abrir bitácora completa" la abre en Excel.
-- Si la tienes abierta en Excel, ciérrala para que se sigan guardando
-  los registros nuevos.
-- Si al escribir directo en la ventana no sale un acento o la ñ, usa
-  "Texto para publicar" y pega con Ctrl+V.
-
-SEGURIDAD
-- Solo funciona por cable USB. No abre conexiones por Wi-Fi ni internet,
-  y no envía tus datos a ningún lado.
-- Al cerrar el panel se cierran todas las conexiones con los celulares.
-- Si dejas de usar esta computadora o la prestas: en cada celular ve a
-  Opciones de desarrollador > "Revocar autorizaciones de depuración USB".
-- Puedes desactivar la "Depuración USB" cuando no uses el panel.
+SEGURIDAD Y DIAGNÓSTICO
+- El panel bloquea instancias duplicadas para no interferir con las conexiones.
+- Si el panel no abre, revisa "registro_errores.txt" en la misma carpeta.
+- Ejecuta "Diagnostico.bat" para generar un reporte del entorno en caso de problemas.
+- Si dejas de usar la computadora, revoca la autorización USB desde los ajustes del celular.

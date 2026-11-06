@@ -1,154 +1,180 @@
 import ctypes
+import csv
+from difflib import SequenceMatcher
 import json
 import math
 import os
 import queue
+import random
 import re
 import subprocess
+import tempfile
 import threading
 import time
 import tkinter as tk
 import unicodedata
 import xml.etree.ElementTree as ET
+import sys
+import traceback
 from pathlib import Path
 from tkinter import filedialog, messagebox, scrolledtext, simpledialog, ttk
 from urllib.parse import urlparse
+import base64
 
 NO_WINDOW = getattr(subprocess, "CREATE_NO_WINDOW", 0) if os.name == "nt" else 0
+CREATE_NEW_CONSOLE = getattr(subprocess, "CREATE_NEW_CONSOLE", 16) if os.name == "nt" else 0
 INSTANCE_MUTEX = None
-
+BASE_DIR = Path(__file__).resolve().parent
 
 def acquire_single_instance():
-    """Impide que dos copias del panel administren los mismos dispositivos."""
     global INSTANCE_MUTEX
     if os.name != "nt":
         return True
-    kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
-    kernel32.CreateMutexW.argtypes = (ctypes.c_void_p, ctypes.c_bool, ctypes.c_wchar_p)
-    kernel32.CreateMutexW.restype = ctypes.c_void_p
-    kernel32.CloseHandle.argtypes = (ctypes.c_void_p,)
-    kernel32.CloseHandle.restype = ctypes.c_bool
-    ctypes.set_last_error(0)
-    handle = kernel32.CreateMutexW(
-        None, False, "Local\\PanelCelularesV2_MultiDispositivo"
-    )
-    if not handle:
-        return False
-    if ctypes.get_last_error() == 183:  # ERROR_ALREADY_EXISTS
-        kernel32.CloseHandle(handle)
-        return False
-    INSTANCE_MUTEX = (kernel32, handle)
-    return True
-
+    try:
+        kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+        handle = kernel32.CreateMutexW(None, False, "Local\\PanelCelularesV2_MultiDispositivo")
+        if not handle:
+            return False
+        if ctypes.get_last_error() == 183:
+            kernel32.CloseHandle(handle)
+            return False
+        INSTANCE_MUTEX = (kernel32, handle)
+        return True
+    except Exception:
+        return True
 
 def release_single_instance():
     global INSTANCE_MUTEX
     if INSTANCE_MUTEX:
-        kernel32, handle = INSTANCE_MUTEX
-        kernel32.CloseHandle(handle)
+        try:
+            kernel32, handle = INSTANCE_MUTEX
+            kernel32.CloseHandle(handle)
+        except Exception:
+            pass
         INSTANCE_MUTEX = None
 
-# Intentar importar OpenCV y NumPy para el reconocimiento de formas
 try:
     import cv2
     import numpy as np
-
     OPENCV_AVAILABLE = True
 except ImportError:
     OPENCV_AVAILABLE = False
 
 
 class ProfessionalPhoneController:
-
     def __init__(self, root):
         self.root = root
-        self.root.title(
-            "Panel de Control Multi-Dispositivo - Facebook Automation & Vision"
-        )
-        self.root.geometry("1050x850")
-        self.root.minsize(950, 750)
+        self.root.title("Panel de Control Multi-Dispositivo - FB Lite & Modo Agencia")
+        self.root.geometry("1150x950")
+        self.root.minsize(1000, 750)
 
-        # Detectar la ruta de ADB automáticamente (busca en 'herramientas' o en el sistema)
         self.adb = self.find_adb()
         self.scrcpy = self.find_scrcpy()
         self.ui_queue = queue.Queue()
         self.search_stop_event = threading.Event()
+        self.human_stop_event = threading.Event()
+        self.report_stop_event = threading.Event()
+        self.advanced_stop_event = threading.Event()
+        self.maintenance_stop_event = threading.Event()
+        self.interaction_stop_event = threading.Event()
+        self.app_closing = threading.Event()
+        
         self.search_running = False
+        self.human_running = False
+        self.report_running = False
+        self.advanced_running = False
+        self.maintenance_running = False
+        self.interaction_running = False
+        self.interaction_devices = set()
+        self.combined_next_action = None
         self.screen_size_cache = {}
-        self.device_config_file = Path(__file__).resolve().parent / "dispositivos.json"
+        
+        self.device_config_file = BASE_DIR / "dispositivos.json"
+        self.search_record_dir = BASE_DIR / "registros_busqueda"
+        self.templates_dir = BASE_DIR / "templates"
+        self.templates_dir.mkdir(exist_ok=True)
+
         self.device_aliases = self.load_device_aliases()
         self.device_details = {}
         self.device_tasks = {}
+        self.device_tasks_lock = threading.Lock()
+        self.busy_devices = set()
+        self.uiautomator_lock = threading.Lock()
         self.scrcpy_processes = {}
         self.search_devices = []
+        self.pending_search_match = None
+        self.ocr_warning_shown = False
         self.first_device_scan = True
+
         self.root.after(100, self._drain_ui_queue)
         self.root.protocol("WM_DELETE_WINDOW", self.on_close)
 
-        # Configuración de Estilo Global (TTK)
         style = ttk.Style()
-        style.theme_use("clam")
-        style.configure(
-            "TButton", font=("Segoe UI", 9, "bold"), padding=6, relief="flat"
-        )
-        style.configure(
-            "Primary.TButton", background="#1877f2", foreground="white"
-        )
-        style.configure(
-            "Success.TButton", background="#42b72a", foreground="white"
-        )
-
-        # Crear carpeta de plantillas si no existe
-        if not os.path.exists("templates"):
-            os.makedirs("templates")
+        try:
+            style.theme_use("clam")
+        except Exception:
+            pass
+        style.configure("TButton", font=("Segoe UI", 9, "bold"), padding=6, relief="flat")
+        style.configure("Primary.TButton", background="#1877f2", foreground="white")
+        style.configure("Success.TButton", background="#42b72a", foreground="white")
+        style.configure("Warning.TButton", background="#f0ad4e", foreground="white")
 
         self.devices = []
 
-        # --- Creación de Pestañas (Notebook) ---
         self.notebook = ttk.Notebook(self.root)
         self.notebook.pack(fill="both", expand=True, padx=10, pady=10)
 
         self.tab_general = ttk.Frame(self.notebook)
-        self.tab_vision = ttk.Frame(self.notebook)
+        self.tab_interaction = ttk.Frame(self.notebook)
         self.tab_search = ttk.Frame(self.notebook)
+        self.tab_vision = ttk.Frame(self.notebook)
+        self.tab_human = ttk.Frame(self.notebook)
+        self.tab_report = ttk.Frame(self.notebook)
+        self.tab_advanced = ttk.Frame(self.notebook)
+        self.tab_maintenance = ttk.Frame(self.notebook)
 
-        self.notebook.add(self.tab_general, text=" Control y Automatización General ")
-        self.notebook.add(
-            self.tab_vision, text=" Reacciones por Forma (Computer Vision) "
-        )
-        self.notebook.add(
-            self.tab_search, text=" Búsqueda por Palabras "
-        )
+        self.notebook.add(self.tab_general, text=" Control General ")
+        self.notebook.add(self.tab_interaction, text=" Interacciones FB Lite ")
+        self.notebook.add(self.tab_search, text=" Búsqueda (Escucha) ")
+        self.notebook.add(self.tab_vision, text=" Reacciones (OpenCV) ")
+        self.notebook.add(self.tab_human, text=" 🛡️ Modo Humano ")
+        self.notebook.add(self.tab_report, text=" 🚨 Reportes Masivos ")
+        self.notebook.add(self.tab_advanced, text=" 🚀 Auto-Invitación & Scraping ")
+        self.notebook.add(self.tab_maintenance, text=" 🧹 Mantenimiento & Live ")
 
         self.create_general_widgets()
-        self.create_vision_widgets()
+        self.create_interaction_widgets()
         self.create_search_widgets()
-
-        # Consola de Registros global inferior
+        self.create_vision_widgets()
+        self.create_human_widgets()
+        self.create_report_widgets()
+        self.create_advanced_widgets()
+        self.create_maintenance_widgets()
         self.create_console_widget()
 
-        self.refresh_devices()
+        self.refresh_devices_async()
+        threading.Thread(target=self.auto_scan_worker, daemon=True).start()
+
+    def auto_scan_worker(self):
+        while not self.app_closing.is_set():
+            time.sleep(4)
+            if not any([self.search_running, self.human_running, self.report_running, self.advanced_running, self.maintenance_running]):
+                current = self.get_devices()
+                if set(current) != set(self.devices):
+                    self.post_ui(self.refresh_devices_async)
 
     def find_adb(self):
-        # Buscar adb.exe dentro de la carpeta 'herramientas' del proyecto
-        base_dir = os.path.dirname(os.path.abspath(__file__))
-        
-        tools_path = os.path.join(base_dir, "herramientas")
-        if os.path.exists(tools_path):
+        tools_path = BASE_DIR / "herramientas"
+        if tools_path.exists():
             for root, dirs, files in os.walk(tools_path):
                 if "adb.exe" in files:
                     return os.path.join(root, "adb.exe")
-        
         import shutil
         sys_adb = shutil.which("adb")
-        if sys_adb:
-            return sys_adb
-            
-        return "adb"
+        return sys_adb if sys_adb else "adb"
 
     def find_scrcpy(self):
-        base_dir = Path(__file__).resolve().parent
-        for candidate in (base_dir / "herramientas").glob("**/scrcpy.exe"):
+        for candidate in (BASE_DIR / "herramientas").glob("**/scrcpy.exe"):
             return str(candidate)
         return None
 
@@ -157,1269 +183,2672 @@ class ProfessionalPhoneController:
             if self.device_config_file.exists():
                 data = json.loads(self.device_config_file.read_text(encoding="utf-8"))
                 if isinstance(data, dict):
-                    return {
-                        str(serial): str(alias).strip()
-                        for serial, alias in data.items()
-                        if str(alias).strip()
-                    }
-        except Exception as error:
-            self.log(f"No se pudieron cargar los nombres de dispositivos: {error}")
+                    return {str(k): str(v).strip() for k, v in data.items() if str(v).strip()}
+        except Exception as e:
+            self.log(f"No se pudieron cargar los alias: {e}")
         return {}
 
     def save_device_aliases(self):
         try:
-            self.device_config_file.write_text(
-                json.dumps(self.device_aliases, ensure_ascii=False, indent=2),
-                encoding="utf-8",
-            )
-        except Exception as error:
-            messagebox.showerror(
-                "No se pudo guardar",
-                f"No se guardó el nombre del dispositivo:\n{error}",
-            )
+            self.device_config_file.write_text(json.dumps(self.device_aliases, ensure_ascii=False, indent=2), encoding="utf-8")
+        except Exception as e:
+            messagebox.showerror("Error", f"No se pudo guardar alias: {e}")
 
     def create_general_widgets(self):
-        # --- Marco Superior: Dispositivos ---
-        dev_frame = ttk.LabelFrame(
-            self.tab_general, text=" Gestión de Dispositivos Conectados ", padding=10
-        )
+        dev_frame = ttk.LabelFrame(self.tab_general, text=" Gestión de Dispositivos Conectados ", padding=10)
         dev_frame.pack(fill="x", padx=10, pady=10)
 
-        device_toolbar = ttk.Frame(dev_frame)
-        device_toolbar.pack(fill="x", pady=(0, 7))
+        toolbar = ttk.Frame(dev_frame)
+        toolbar.pack(fill="x", pady=(0, 7))
 
-        ttk.Button(
-            device_toolbar,
-            text="Escanear Dispositivos",
-            command=self.refresh_devices,
-            style="Success.TButton",
-        ).pack(side="left")
-        ttk.Button(
-            device_toolbar, text="Seleccionar todos", command=self.select_all_devices
-        ).pack(side="left", padx=(7, 0))
-        ttk.Button(
-            device_toolbar, text="Ninguno", command=self.clear_device_selection
-        ).pack(side="left", padx=(7, 0))
-        ttk.Button(
-            device_toolbar, text="Asignar nombre", command=self.rename_selected_device
-        ).pack(side="left", padx=(7, 0))
-        ttk.Button(
-            device_toolbar,
-            text="Ver y controlar",
-            command=self.open_selected_screens,
-            style="Primary.TButton",
-        ).pack(side="left", padx=(18, 0))
-        ttk.Button(
-            device_toolbar,
-            text="Cerrar pantallas",
-            command=self.close_selected_screens,
-        ).pack(side="left", padx=(7, 0))
+        ttk.Button(toolbar, text="Escanear Dispositivos", command=self.refresh_devices_async, style="Success.TButton").pack(side="left")
+        ttk.Button(toolbar, text="Seleccionar todos", command=self.select_all_devices).pack(side="left", padx=(7, 0))
+        ttk.Button(toolbar, text="Ninguno", command=self.clear_device_selection).pack(side="left", padx=(7, 0))
+        ttk.Button(toolbar, text="Asignar nombre", command=self.rename_selected_device).pack(side="left", padx=(7, 0))
+        ttk.Button(toolbar, text="Ver en Pantalla", command=self.open_selected_screens, style="Primary.TButton").pack(side="left", padx=(18, 0))
+        ttk.Button(toolbar, text="Cerrar pantallas", command=self.close_selected_screens).pack(side="left", padx=(7, 0))
 
-        self.lbl_devices = ttk.Label(
-            device_toolbar,
-            text="Dispositivos detectados: 0",
-            font=("Segoe UI", 9, "bold"),
-        )
+        self.lbl_devices = ttk.Label(toolbar, text="Dispositivos detectados: 0", font=("Segoe UI", 9, "bold"))
         self.lbl_devices.pack(side="right", padx=5)
 
         table_frame = ttk.Frame(dev_frame)
         table_frame.pack(fill="x")
         columns = ("nombre", "modelo", "serial", "android", "estado", "tarea")
-        self.device_table = ttk.Treeview(
-            table_frame,
-            columns=columns,
-            show="headings",
-            selectmode="extended",
-            height=4,
-        )
-        headings = {
-            "nombre": "Nombre",
-            "modelo": "Modelo",
-            "serial": "Serie",
-            "android": "Android",
-            "estado": "Estado",
-            "tarea": "Tarea actual",
-        }
-        widths = {
-            "nombre": 140,
-            "modelo": 135,
-            "serial": 135,
-            "android": 70,
-            "estado": 95,
-            "tarea": 180,
-        }
-        for column in columns:
-            self.device_table.heading(column, text=headings[column])
-            self.device_table.column(column, width=widths[column], anchor="w")
+        self.device_table = ttk.Treeview(table_frame, columns=columns, show="headings", selectmode="extended", height=4)
+        headings = {"nombre": "Nombre", "modelo": "Modelo", "serial": "Serie", "android": "Android", "estado": "Estado", "tarea": "Tarea actual"}
+        widths = {"nombre": 140, "modelo": 135, "serial": 135, "android": 70, "estado": 95, "tarea": 180}
+        for col in columns:
+            self.device_table.heading(col, text=headings[col])
+            self.device_table.column(col, width=widths[col], anchor="w")
         self.device_table.pack(side="left", fill="x", expand=True)
-        device_scroll = ttk.Scrollbar(
-            table_frame, orient="vertical", command=self.device_table.yview
-        )
-        device_scroll.pack(side="right", fill="y")
-        self.device_table.configure(yscrollcommand=device_scroll.set)
+        scroll = ttk.Scrollbar(table_frame, orient="vertical", command=self.device_table.yview)
+        scroll.pack(side="right", fill="y")
+        self.device_table.configure(yscrollcommand=scroll.set)
         self.device_table.bind("<<TreeviewSelect>>", self.update_selection_label)
-        self.device_table.bind("<Double-1>", lambda _event: self.rename_selected_device())
+        self.device_table.bind("<Double-1>", lambda e: self.rename_selected_device())
 
-        self.lbl_selection = ttk.Label(
-            dev_frame,
-            text="Seleccionados: 0",
-            foreground="#1d5f91",
-            font=("Segoe UI", 9, "bold"),
-        )
+        self.lbl_selection = ttk.Label(dev_frame, text="Seleccionados: 0", foreground="#1d5f91", font=("Segoe UI", 9, "bold"))
         self.lbl_selection.pack(anchor="w", pady=(6, 0))
 
-        # --- Marco Central: acciones para la selección actual ---
-        act_frame = ttk.LabelFrame(
-            self.tab_general, text=" Tareas para los dispositivos seleccionados ", padding=10
-        )
+        act_frame = ttk.LabelFrame(self.tab_general, text=" Tareas Básicas de Sistema ", padding=10)
         act_frame.pack(fill="x", padx=10, pady=5)
 
-        ttk.Button(
-            act_frame,
-            text="Abrir Facebook en seleccionados",
-            command=self.open_facebook_all,
-            style="Primary.TButton",
-        ).pack(anchor="w", padx=5, pady=5)
+        ttk.Button(act_frame, text="Abrir Facebook en seleccionados", command=self.open_facebook_all, style="Primary.TButton").pack(anchor="w", padx=5, pady=5)
+        
+        ttk.Label(act_frame, text="Inyectar texto directo:", font=("Segoe UI", 9)).pack(anchor="w", padx=5, pady=(10, 2))
+        self.text_post_general = scrolledtext.ScrolledText(act_frame, width=80, height=3, font=("Segoe UI", 10))
+        self.text_post_general.pack(fill="x", padx=5, pady=2)
+        ttk.Button(act_frame, text="Inyectar Texto Simple", command=lambda: self.execute_multithreaded(lambda dev: self.inject_text_adb(dev, self.text_post_general.get("1.0", tk.END).strip()), "Inyectando Texto")).pack(anchor="w", padx=5, pady=5)
 
-        ttk.Label(
-            act_frame, text="Abrir Link / URL en Facebook:", font=("Segoe UI", 9)
-        ).pack(anchor="w", padx=5, pady=2)
-        url_row = ttk.Frame(act_frame)
-        url_row.pack(fill="x", padx=5, pady=2)
+    def create_interaction_widgets(self):
+        info_lbl = ttk.Label(self.tab_interaction, text="Accesibilidad + clic calculado por figura para localizar Me gusta y Comentario.", font=("Segoe UI", 9, "italic", "bold"), foreground="#1877f2")
+        info_lbl.pack(anchor="w", padx=15, pady=(15, 5))
 
-        self.entry_url = ttk.Entry(url_row, font=("Segoe UI", 10))
-        self.entry_url.pack(side="left", fill="x", expand=True, padx=(0, 5))
-        self.entry_url.insert(0, "https://www.facebook.com")
+        int_frame = ttk.LabelFrame(self.tab_interaction, text=" Configuración de la Acción ", padding=15)
+        int_frame.pack(fill="x", padx=15, pady=5)
 
-        ttk.Button(
-            url_row,
-            text="Abrir en seleccionados",
-            command=self.open_url_all,
+        ttk.Label(int_frame, text="URL de la publicación (Post, Foto, Video):", font=("Segoe UI", 9, "bold")).pack(anchor="w", pady=2)
+        self.entry_int_url = ttk.Entry(int_frame, font=("Segoe UI", 10))
+        self.entry_int_url.pack(fill="x", pady=(0, 10))
+
+        opts_frame = ttk.Frame(int_frame)
+        opts_frame.pack(fill="x", pady=5)
+
+        self.int_airplane_var = tk.BooleanVar(value=False)
+        ttk.Checkbutton(opts_frame, text="🛡️ Rotar IP (Activar Modo Avión 5s)", variable=self.int_airplane_var).pack(side="left")
+
+        self.int_warmup_var = tk.BooleanVar(value=True)
+        ttk.Checkbutton(opts_frame, text="☕ Realizar Calentamiento previo en Feed", variable=self.int_warmup_var).pack(side="left", padx=(20, 0))
+
+        vision_opts = ttk.Frame(int_frame)
+        vision_opts.pack(fill="x", pady=(6, 2))
+        self.int_calculated_click_var = tk.BooleanVar(value=True)
+        ttk.Checkbutton(
+            vision_opts,
+            text="🎯 Clic calculado por figura (manita / comentario)",
+            variable=self.int_calculated_click_var,
+        ).pack(side="left")
+        self.int_reel_mode_var = tk.BooleanVar(value=False)
+        ttk.Checkbutton(
+            vision_opts,
+            text="🎬 Reel",
+            variable=self.int_reel_mode_var,
+        ).pack(side="left", padx=(18, 0))
+        ttk.Label(vision_opts, text="Desplazamientos máximos:").pack(side="left", padx=(18, 4))
+        self.int_calculated_scrolls_var = tk.StringVar(value="8")
+        ttk.Spinbox(
+            vision_opts,
+            from_=0,
+            to=30,
+            width=4,
+            textvariable=self.int_calculated_scrolls_var,
+        ).pack(side="left")
+
+        ttk.Label(int_frame, text="Texto del Comentario (Usa Spintax: {Hola|Qué tal}):", font=("Segoe UI", 9)).pack(anchor="w", pady=(10, 2))
+        self.text_int_comment = scrolledtext.ScrolledText(int_frame, height=4, font=("Segoe UI", 10))
+        self.text_int_comment.pack(fill="x", pady=(0, 10))
+
+        sec_frame = ttk.LabelFrame(self.tab_interaction, text=" Parámetros de Tiempos ", padding=10)
+        sec_frame.pack(fill="x", padx=15, pady=5)
+
+        row2 = ttk.Frame(sec_frame)
+        row2.pack(fill="x", pady=4)
+        ttk.Label(row2, text="Espera para cargar publicación en FB Lite:").pack(side="left")
+        self.int_load_min = tk.StringVar(value="6.0")
+        ttk.Spinbox(row2, from_=4.0, to=30.0, increment=1.0, width=4, textvariable=self.int_load_min).pack(side="left", padx=4)
+        ttk.Label(row2, text="a").pack(side="left")
+        self.int_load_max = tk.StringVar(value="10.0")
+        ttk.Spinbox(row2, from_=4.0, to=30.0, increment=1.0, width=4, textvariable=self.int_load_max).pack(side="left", padx=4)
+        ttk.Label(row2, text="segundos").pack(side="left")
+
+        btn_row = ttk.Frame(self.tab_interaction)
+        btn_row.pack(fill="x", padx=15, pady=15)
+
+        self.int_do_like_var = tk.BooleanVar(value=True)
+        ttk.Checkbutton(
+            btn_row, text="👍 Me gusta", variable=self.int_do_like_var
+        ).pack(side="left", padx=(0, 10))
+        self.int_do_comment_var = tk.BooleanVar(value=True)
+        ttk.Checkbutton(
+            btn_row, text="💬 Comentario", variable=self.int_do_comment_var
+        ).pack(side="left", padx=(0, 14))
+        self.btn_start_selected = ttk.Button(
+            btn_row,
+            text="▶ Ejecutar acciones seleccionadas",
+            command=self.start_selected_interactions,
             style="Success.TButton",
-        ).pack(side="right")
-
-        ttk.Label(
-            act_frame,
-            text="Texto para Publicar / Redactar:",
-            font=("Segoe UI", 9),
-        ).pack(anchor="w", padx=5, pady=(10, 2))
-        self.text_post = scrolledtext.ScrolledText(
-            act_frame, width=80, height=4, font=("Segoe UI", 10)
         )
-        self.text_post.pack(fill="x", padx=5, pady=2)
+        self.btn_start_selected.pack(side="left", ipadx=8, ipady=4)
+        self.btn_stop_interaction = ttk.Button(
+            btn_row,
+            text="⏹ Detener proceso",
+            command=self.stop_interaction_process,
+            style="Warning.TButton",
+            state="disabled",
+        )
+        self.btn_stop_interaction.pack(side="left", ipadx=8, ipady=4)
+        self.interaction_status_var = tk.StringVar(value="Listo")
+        ttk.Label(btn_row, textvariable=self.interaction_status_var).pack(side="right", padx=8)
 
-        ttk.Button(
-            act_frame,
-            text="Enviar texto a seleccionados",
-            command=self.publish_text_all,
-            style="Success.TButton",
-        ).pack(anchor="w", padx=5, pady=5)
+    def create_human_widgets(self):
+        human_frame = ttk.LabelFrame(self.tab_human, text=" 🛡️ Configuración de Calentamiento y Comportamiento Humano ", padding=15)
+        human_frame.pack(fill="both", expand=True, padx=15, pady=15)
+
+        ttk.Label(human_frame, text="Simula actividad real en Facebook Lite: desplazamiento variable con pausas de lectura, visualización de videos/reels y pausas prolongadas para evitar bloqueos.", font=("Segoe UI", 9, "italic"), foreground="#1877f2").pack(anchor="w", pady=(0, 10))
+
+        opts = ttk.Frame(human_frame)
+        opts.pack(fill="x", pady=5)
+
+        self.hum_scroll_var = tk.BooleanVar(value=True)
+        ttk.Checkbutton(opts, text="📜 Scroll orgánico variable (arriba/abajo con pausas)", variable=self.hum_scroll_var).pack(anchor="w", pady=3)
+
+        self.hum_video_var = tk.BooleanVar(value=True)
+        ttk.Checkbutton(opts, text="📺 Pausar ocasionalmente en videos / reels (10-30s)", variable=self.hum_video_var).pack(anchor="w", pady=3)
+
+        self.hum_like_var = tk.BooleanVar(value=False)
+        ttk.Checkbutton(opts, text="👍 Dar Me gusta ocasional de forma aleatoria (1 de cada 10 posts)", variable=self.hum_like_var).pack(anchor="w", pady=3)
+
+        dur_frame = ttk.LabelFrame(human_frame, text=" Duración de la Sesión de Calentamiento ", padding=10)
+        dur_frame.pack(fill="x", pady=15)
+
+        row_dur = ttk.Frame(dur_frame)
+        row_dur.pack(fill="x", pady=5)
+        ttk.Label(row_dur, text="Tiempo total de ejecución continua:").pack(side="left")
+        self.hum_duration_var = tk.StringVar(value="30")
+        ttk.Spinbox(row_dur, from_=5.0, to=240.0, increment=5.0, width=5, textvariable=self.hum_duration_var).pack(side="left", padx=8)
+        ttk.Label(row_dur, text="minutos").pack(side="left")
+
+        btn_row_hum = ttk.Frame(human_frame)
+        btn_row_hum.pack(fill="x", pady=15)
+
+        self.btn_start_human = ttk.Button(btn_row_hum, text="▶ Iniciar Modo Humano en Seleccionados", command=self.start_human_warming, style="Success.TButton")
+        self.btn_start_human.pack(side="left", ipadx=10, ipady=5)
+
+        self.btn_stop_human = ttk.Button(btn_row_hum, text="⏹ Detener Modo Humano", command=self.stop_human_warming, style="Warning.TButton", state="disabled")
+        self.btn_stop_human.pack(side="left", padx=15, ipadx=10, ipady=5)
+
+        self.hum_status_var = tk.StringVar(value="Estado: Inactivo")
+        ttk.Label(human_frame, textvariable=self.hum_status_var, font=("Segoe UI", 9, "bold"), foreground="#1d5f91").pack(anchor="w", pady=10)
+
+    def create_report_widgets(self):
+        rep_frame = ttk.LabelFrame(self.tab_report, text=" 🚨 Automatización de Reportes Masivos (Publicación / Perfil) ", padding=15)
+        rep_frame.pack(fill="both", expand=True, padx=15, pady=15)
+
+        ttk.Label(rep_frame, text="Ingresa el enlace de la publicación o perfil a reportar y selecciona el motivo:", font=("Segoe UI", 9, "bold")).pack(anchor="w", pady=(0, 5))
+        
+        self.entry_rep_url = ttk.Entry(rep_frame, font=("Segoe UI", 10))
+        self.entry_rep_url.pack(fill="x", pady=(0, 10))
+
+        m_frame = ttk.LabelFrame(rep_frame, text=" Motivo del Reporte ", padding=10)
+        m_frame.pack(fill="x", pady=10)
+
+        self.rep_reason_var = tk.StringVar(value="spam")
+        ttk.Radiobutton(m_frame, text="Spam / Publicidad engañosa", variable=self.rep_reason_var, value="spam").pack(anchor="w", pady=2)
+        ttk.Radiobutton(m_frame, text="Información falsa / Fake News", variable=self.rep_reason_var, value="falsa").pack(anchor="w", pady=2)
+        ttk.Radiobutton(m_frame, text="Cuenta falsa / Suplantación", variable=self.rep_reason_var, value="cuenta").pack(anchor="w", pady=2)
+
+        opts_rep = ttk.Frame(rep_frame)
+        opts_rep.pack(fill="x", pady=10)
+        self.rep_airplane_var = tk.BooleanVar(value=True)
+        ttk.Checkbutton(opts_rep, text="🛡️ Rotar IP con Modo Avión antes de cada reporte (Recomendado)", variable=self.rep_airplane_var).pack(anchor="w")
+
+        btn_row_rep = ttk.Frame(rep_frame)
+        btn_row_rep.pack(fill="x", pady=15)
+
+        self.btn_start_report = ttk.Button(btn_row_rep, text="🚀 Ejecutar Reporte Masivo en Seleccionados", command=self.start_mass_report, style="Success.TButton")
+        self.btn_start_report.pack(side="left", ipadx=10, ipady=5)
+
+        self.btn_stop_report = ttk.Button(btn_row_rep, text="⏹ Detener Reportes", command=self.stop_mass_report, style="Warning.TButton", state="disabled")
+        self.btn_stop_report.pack(side="left", padx=15, ipadx=10, ipady=5)
+
+        self.rep_status_var = tk.StringVar(value="Estado: Listo para reportar.")
+        ttk.Label(rep_frame, textvariable=self.rep_status_var, font=("Segoe UI", 9, "bold"), foreground="#1d5f91").pack(anchor="w", pady=10)
+
+    def create_advanced_widgets(self):
+        adv_frame = ttk.LabelFrame(self.tab_advanced, text=" 🚀 Módulo Avanzado: Auto-Invitaciones, Scraping de Leads y Publicación en Grupos ", padding=15)
+        adv_frame.pack(fill="both", expand=True, padx=15, pady=15)
+
+        # 1. Auto-Invitación
+        inv_frame = ttk.LabelFrame(adv_frame, text="1. Auto-Invitación Masiva a Eventos / Páginas", padding=10)
+        inv_frame.pack(fill="x", pady=5)
+        ttk.Label(inv_frame, text="URL del Evento o Página a invitar:").pack(anchor="w")
+        self.entry_inv_url = ttk.Entry(inv_frame, font=("Segoe UI", 9))
+        self.entry_inv_url.pack(fill="x", pady=(2, 5))
+        ttk.Button(inv_frame, text="👥 Iniciar Auto-Invitación en Seleccionados", command=self.start_auto_invite, style="Primary.TButton").pack(anchor="w", pady=2)
+
+        # 2. Scraping de Leads / Comentarios
+        scrap_frame = ttk.LabelFrame(adv_frame, text="2. Scraping y Extracción de Leads (Comentarios)", padding=10)
+        scrap_frame.pack(fill="x", pady=5)
+        ttk.Label(scrap_frame, text="Extrae perfiles y textos de comentarios de la publicación activa en pantalla a CSV.").pack(anchor="w")
+        ttk.Button(scrap_frame, text="📥 Extraer Comentarios a CSV", command=self.start_lead_scraping, style="Success.TButton").pack(anchor="w", pady=5)
+
+        # 3. Cross-Posting en Grupos
+        group_frame = ttk.LabelFrame(adv_frame, text="3. Publicación Cruzada (Cross-Posting) en Grupos", padding=10)
+        group_frame.pack(fill="x", pady=5)
+        ttk.Label(group_frame, text="Texto a publicar en rotación (Soporta Spintax):").pack(anchor="w")
+        self.text_group_post = scrolledtext.ScrolledText(group_frame, height=3, font=("Segoe UI", 9))
+        self.text_group_post.pack(fill="x", pady=(2, 5))
+        ttk.Button(group_frame, text="📢 Publicar en Grupos Masivamente", command=self.start_group_crosspost, style="Success.TButton").pack(anchor="w", pady=2)
+
+        self.adv_status_var = tk.StringVar(value="Estado Avanzado: En espera.")
+        ttk.Label(adv_frame, textvariable=self.adv_status_var, font=("Segoe UI", 9, "bold"), foreground="#1d5f91").pack(anchor="w", pady=10)
+
+    def create_maintenance_widgets(self):
+        maint_frame = ttk.LabelFrame(self.tab_maintenance, text=" 🧹 Mantenimiento de Cuentas y Live Streaming Booster ", padding=15)
+        maint_frame.pack(fill="both", expand=True, padx=15, pady=15)
+
+        # 1. Limpieza de notificaciones y solicitudes
+        clean_frame = ttk.LabelFrame(maint_frame, text="1. Limpieza de Notificaciones y Solicitudes de Amistad", padding=10)
+        clean_frame.pack(fill="x", pady=5)
+        ttk.Label(clean_frame, text="Simula mantenimiento automático para limpiar alertas acumuladas y aceptar/rechazar pendientes.").pack(anchor="w", pady=2)
+        ttk.Button(clean_frame, text="🧹 Ejecutar Mantenimiento de Cuentas", command=self.start_account_maintenance, style="Warning.TButton").pack(anchor="w", pady=5)
+
+        # 2. Live Streaming Booster
+        live_frame = ttk.LabelFrame(maint_frame, text="2. Live Streaming Booster (Tracción en En Vivos)", padding=10)
+        live_frame.pack(fill="x", pady=5)
+        ttk.Label(live_frame, text="URL de la Transmisión en Vivo:").pack(anchor="w")
+        self.entry_live_url = ttk.Entry(live_frame, font=("Segoe UI", 9))
+        self.entry_live_url.pack(fill="x", pady=(2, 5))
+        ttk.Button(live_frame, text="📺 Iniciar Booster de Transmisión", command=self.start_live_booster, style="Primary.TButton").pack(anchor="w", pady=2)
+
+        self.maint_status_var = tk.StringVar(value="Estado de Mantenimiento: En espera.")
+        ttk.Label(maint_frame, textvariable=self.maint_status_var, font=("Segoe UI", 9, "bold"), foreground="#1d5f91").pack(anchor="w", pady=10)
+
+    # --- LÓGICA DE LAS NUEVAS 5 ACTIVIDADES ---
+
+    def start_auto_invite(self):
+        url = self.entry_inv_url.get().strip()
+        devs = self.get_selected_devices()
+        if not devs or not url: return messagebox.showwarning("Aviso", "Selecciona dispositivos e ingresa una URL.")
+        self.log("🚀 Iniciando Auto-Invitación masiva...")
+        def task(d):
+            self.run_on_device(d, ["shell", "am", "start", "-a", "android.intent.action.VIEW", "-d", url, "com.facebook.lite"])
+            time.sleep(6)
+            size = self.screen_size_cache.get(d, (1080, 1920))
+            for _ in range(5): # Scroll por la lista de amigos y toque en invitar
+                self.find_node_and_tap(d, ["invitar", "invite"], size)
+                self.run_on_device(d, ["shell", "input", "swipe", str(size[0]//2), str(int(size[1]*0.7)), str(size[0]//2), str(int(size[1]*0.3)), "400"])
+                time.sleep(2)
+        self.execute_multithreaded(task, "Auto-Invitación")
+
+    def start_lead_scraping(self):
+        devs = self.get_selected_devices()
+        if not devs: return messagebox.showwarning("Aviso", "Selecciona al menos un celular.")
+        self.log("📥 Extrayendo comentarios y leads de la pantalla actual...")
+        def task(d):
+            hierarchy = self.get_android_hierarchy(d)
+            if not hierarchy: return
+            records = []
+            for node in hierarchy.iter("node"):
+                txt = node.attrib.get("text", "").strip()
+                if txt and len(txt) > 3:
+                    records.append([time.strftime("%Y-%m-%d %H:%M:%S"), d, txt])
+            if records:
+                os.makedirs(self.search_record_dir, exist_ok=True)
+                csv_path = self.search_record_dir / f"leads_{time.strftime('%Y-%m-%d')}.csv"
+                with open(csv_path, "a", newline="", encoding="utf-8-sig") as f:
+                    writer = csv.writer(f)
+                    writer.writerows(records)
+                self.log(f"[{d}] ✓ {len(records)} elementos extraídos y guardados en CSV.")
+        self.execute_multithreaded(task, "Scraping de Leads")
+
+    def start_group_crosspost(self):
+        text = self.text_group_post.get("1.0", tk.END).strip()
+        devs = self.get_selected_devices()
+        if not devs or not text: return messagebox.showwarning("Aviso", "Selecciona dispositivos y escribe contenido.")
+        self.log("📢 Iniciando publicación cruzada en grupos...")
+        def task(d):
+            final_txt = self.parse_spintax(text)
+            self.run_on_device(d, ["shell", "am", "start", "-a", "android.intent.action.VIEW", "-d", "https://m.facebook.com/groups", "com.facebook.lite"])
+            time.sleep(6)
+            size = self.screen_size_cache.get(d, (1080, 1920))
+            self.find_node_and_tap(d, ["escribe algo", "write something", "publicar"], size)
+            time.sleep(2)
+            self.inject_text_adb(d, final_txt)
+            time.sleep(2)
+            self.find_node_and_tap(d, ["publicar", "post"], size)
+            self.log(f"[{d}] ✓ Publicación en grupo enviada.")
+        self.execute_multithreaded(task, "Cross-Posting")
+
+    def start_account_maintenance(self):
+        devs = self.get_selected_devices()
+        if not devs: return messagebox.showwarning("Aviso", "Selecciona al menos un celular.")
+        self.log("🧹 Ejecutando mantenimiento y limpieza de cuentas...")
+        def task(d):
+            self.run_on_device(d, ["shell", "am", "start", "-a", "android.intent.action.VIEW", "-d", "https://m.facebook.com/notifications", "com.facebook.lite"])
+            time.sleep(5)
+            size = self.screen_size_cache.get(d, (1080, 1920))
+            self.find_node_and_tap(d, ["marcar como leídas", "mark all as read", "aceptar", "confirmar"], size)
+            self.log(f"[{d}] ✓ Mantenimiento completado.")
+        self.execute_multithreaded(task, "Mantenimiento")
+
+    def start_live_booster(self):
+        url = self.entry_live_url.get().strip()
+        devs = self.get_selected_devices()
+        if not devs or not url: return messagebox.showwarning("Aviso", "Selecciona dispositivos e ingresa la URL del Live.")
+        self.log("📺 Iniciando Live Streaming Booster...")
+        def task(d):
+            self.run_on_device(d, ["shell", "am", "start", "-a", "android.intent.action.VIEW", "-d", url, "com.facebook.lite"])
+            time.sleep(10)
+            size = self.screen_size_cache.get(d, (1080, 1920))
+            end_t = time.time() + 600 # Mantener por 10 minutos mandando interacciones periódicas
+            while time.time() < end_t and not self.app_closing.is_set():
+                if OPENCV_AVAILABLE:
+                    self.tap_image_template(d, "love.png")
+                else:
+                    self.run_on_device(d, ["shell", "input", "tap", str(int(size[0]*0.9)), str(int(size[1]*0.8))])
+                time.sleep(30)
+            self.log(f"[{d}] ✓ Sesión de Booster en vivo finalizada.")
+        self.execute_multithreaded(task, "Live Booster")
 
     def create_vision_widgets(self):
-        # --- Pestaña de Reacciones por Forma ---
-        vision_frame = ttk.LabelFrame(
-            self.tab_vision,
-            text=" Búsqueda y Reacción Automática por Icono (OpenCV) ",
-            padding=15,
-        )
+        vision_frame = ttk.LabelFrame(self.tab_vision, text=" Reacciones OpenCV ", padding=15)
         vision_frame.pack(fill="both", expand=True, padx=10, pady=10)
-
         if not OPENCV_AVAILABLE:
-            lbl_warning = ttk.Label(
-                vision_frame,
-                text=(
-                    "⚠️ Advertencia: Las librerías 'opencv-python' y 'numpy' no están"
-                    " instaladas.\nEjecuta en tu terminal: pip install opencv-python"
-                    " numpy"
-                ),
-                foreground="red",
-                font=("Segoe UI", 10, "bold"),
-            )
-            lbl_warning.pack(pady=20)
+            ttk.Label(vision_frame, text="⚠️ OpenCV y NumPy no están instaladas.", foreground="red", font=("Segoe UI", 10, "bold")).pack(pady=20)
             return
-
-        ttk.Label(
-            vision_frame,
-            text=(
-                "Instrucciones:\n1. Coloca imágenes recortadas de las reacciones"
-                " (ej: like.png, love.png, haha.png) en la carpeta 'templates'.\n2."
-                " Selecciona la reacción que deseas buscar y aplicar de forma"
-                " inteligente en los dispositivos seleccionados en la pestaña General."
-            ),
-            font=("Segoe UI", 9),
-        ).pack(anchor="w", pady=5)
-
+        ttk.Label(vision_frame, text="Selecciona la reacción:").pack(anchor="w", pady=5)
         btn_container = ttk.Frame(vision_frame)
         btn_container.pack(pady=20)
-
-        reactions_vision = [
-            ("👍 Reaccionar 'Me gusta' (Forma)", "like.png"),
-            ("❤️ Reaccionar 'Me encanta' (Forma)", "love.png"),
-            ("😆 Reaccionar 'Me divierte' (Forma)", "haha.png"),
-            ("😢 Reaccionar 'Me entristece' (Forma)", "sad.png"),
-            ("😡 Reaccionar 'Me enoja' (Forma)", "angry.png"),
-        ]
-
-        for label_text, filename in reactions_vision:
-            ttk.Button(
-                btn_container,
-                text=label_text,
-                command=lambda f=filename: self.execute_vision_reaction(f),
-            ).pack(fill="x", pady=6, ipadx=10, ipady=3)
+        reactions = [("👍 'Me gusta'", "like.png"), ("❤️ 'Me encanta'", "love.png"), ("😆 'Me divierte'", "haha.png"), ("😢 'Me entristece'", "sad.png"), ("😡 'Me enoja'", "angry.png")]
+        for lbl, fn in reactions: ttk.Button(btn_container, text=lbl, command=lambda f=fn: self.execute_vision_reaction(f)).pack(fill="x", pady=6, ipadx=10, ipady=3)
 
     def create_search_widgets(self):
-        """Crea el modo asistido de búsqueda de publicaciones visibles."""
-        search_frame = ttk.LabelFrame(
-            self.tab_search,
-            text=" Búsqueda asistida en el contenido visible ",
-            padding=12,
-        )
+        search_frame = ttk.LabelFrame(self.tab_search, text=" Búsqueda asistida ", padding=12)
         search_frame.pack(fill="both", expand=True, padx=10, pady=10)
-
-        ttk.Label(
-            search_frame,
-            text=(
-                "Escribe palabras o frases separadas por comas o líneas. El panel "
-                "revisa el texto visible, desplaza la pantalla a intervalos y se "
-                "detiene al encontrar una coincidencia."
-            ),
-            wraplength=800,
-            justify="left",
-        ).pack(fill="x", pady=(0, 8))
-
-        ttk.Label(search_frame, text="Palabras clave:").pack(anchor="w")
-        self.search_keywords = scrolledtext.ScrolledText(
-            search_frame, height=4, font=("Segoe UI", 10)
-        )
+        ttk.Label(search_frame, text="Palabras clave (separadas por comas):").pack(anchor="w")
+        self.search_keywords = scrolledtext.ScrolledText(search_frame, height=3, font=("Segoe UI", 10))
         self.search_keywords.pack(fill="x", pady=(3, 9))
 
-        settings_row = ttk.Frame(search_frame)
-        settings_row.pack(fill="x", pady=3)
-
-        ttk.Label(settings_row, text="Intervalo entre desplazamientos:").pack(
-            side="left"
-        )
-        self.search_interval_var = tk.StringVar(value="1")
-        ttk.Spinbox(
-            settings_row,
-            from_=0.5,
-            to=60,
-            increment=0.5,
-            width=5,
-            textvariable=self.search_interval_var,
-        ).pack(side="left", padx=(6, 4))
-        ttk.Label(settings_row, text="segundos").pack(side="left")
-
-        ttk.Label(settings_row, text="Máximo de desplazamientos:").pack(
-            side="left", padx=(22, 0)
-        )
-        self.search_max_scrolls_var = tk.StringVar(value="20")
-        ttk.Spinbox(
-            settings_row,
-            from_=1,
-            to=200,
-            width=6,
-            textvariable=self.search_max_scrolls_var,
-        ).pack(side="left", padx=(6, 0))
-
-        expand_row = ttk.Frame(search_frame)
-        expand_row.pack(fill="x", pady=3)
-        self.search_expand_more_var = tk.BooleanVar(value=True)
+        action_row = ttk.LabelFrame(search_frame, text=" Acción al encontrar palabras ", padding=8)
+        action_row.pack(fill="x", pady=(2, 7))
+        ttk.Label(
+            action_row,
+            text="La coincidencia abre la publicación pulsando su fecha/hora antes de ejecutar acciones.",
+            foreground="#1d5f91",
+        ).pack(anchor="w", pady=(0, 4))
+        action_checks = ttk.Frame(action_row)
+        action_checks.pack(fill="x")
+        self.search_like_var = tk.BooleanVar(value=False)
         ttk.Checkbutton(
-            expand_row,
-            text='Expandir "Ver más" antes de continuar',
-            variable=self.search_expand_more_var,
+            action_checks,
+            text='👍 Me gusta',
+            variable=self.search_like_var,
         ).pack(side="left")
-        ttk.Label(expand_row, text="Máximo por pantalla:").pack(
-            side="left", padx=(22, 0)
-        )
-        self.search_max_expansions_var = tk.StringVar(value="3")
-        ttk.Spinbox(
-            expand_row,
-            from_=1,
-            to=10,
-            width=4,
-            textvariable=self.search_max_expansions_var,
-        ).pack(side="left", padx=(6, 0))
-        ttk.Label(expand_row, text="Espera después de expandir:").pack(
-            side="left", padx=(22, 0)
-        )
-        self.search_expand_wait_var = tk.StringVar(value="0.7")
-        ttk.Spinbox(
-            expand_row,
-            from_=0.2,
-            to=5,
-            increment=0.1,
-            width=5,
-            textvariable=self.search_expand_wait_var,
-        ).pack(side="left", padx=(6, 4))
-        ttk.Label(expand_row, text="segundos").pack(side="left")
-
+        self.search_comment_var = tk.BooleanVar(value=False)
+        ttk.Checkbutton(
+            action_checks,
+            text='💬 Comentario',
+            variable=self.search_comment_var,
+        ).pack(side="left", padx=(18, 0))
+        comment_row = ttk.Frame(action_row)
+        comment_row.pack(fill="x", padx=(24, 0), pady=(4, 1))
+        ttk.Label(comment_row, text="Texto del comentario:").pack(side="left")
+        self.search_comment_text_var = tk.StringVar()
+        ttk.Entry(comment_row, textvariable=self.search_comment_text_var).pack(side="left", fill="x", expand=True, padx=5)
+        wait_row = ttk.Frame(action_row)
+        wait_row.pack(fill="x", padx=(24, 0), pady=(4, 1))
+        ttk.Label(wait_row, text="Espera antes de las acciones — mínimo:").pack(side="left")
+        self.search_like_min_var = tk.StringVar(value="3")
+        ttk.Spinbox(wait_row, from_=1, to=60, width=5, textvariable=self.search_like_min_var).pack(side="left", padx=5)
+        ttk.Label(wait_row, text="máximo:").pack(side="left")
+        self.search_like_max_var = tk.StringVar(value="8")
+        ttk.Spinbox(wait_row, from_=1, to=60, width=5, textvariable=self.search_like_max_var).pack(side="left", padx=5)
+        ttk.Label(wait_row, text="segundos").pack(side="left")
+        self.search_continuous_var = tk.BooleanVar(value=True)
+        ttk.Checkbutton(
+            action_row,
+            text="Continuar buscando hasta pulsar Detener",
+            variable=self.search_continuous_var,
+        ).pack(anchor="w", pady=(3, 0))
+        
         button_row = ttk.Frame(search_frame)
         button_row.pack(fill="x", pady=(10, 6))
-        self.btn_start_search = ttk.Button(
-            button_row,
-            text="Iniciar búsqueda",
-            command=self.start_keyword_search,
-            style="Success.TButton",
-        )
+        self.btn_start_search = ttk.Button(button_row, text="Iniciar búsqueda", command=self.start_keyword_search, style="Success.TButton")
         self.btn_start_search.pack(side="left")
-        self.btn_stop_search = ttk.Button(
-            button_row,
-            text="Detener",
-            command=self.stop_keyword_search,
-            state="disabled",
-        )
+        self.btn_stop_search = ttk.Button(button_row, text="Detener", command=self.stop_keyword_search, state="disabled")
         self.btn_stop_search.pack(side="left", padx=7)
-        ttk.Button(
-            button_row,
-            text="Limpiar resultados",
-            command=self.clear_search_results,
-        ).pack(side="left")
-
+        
         self.search_status_var = tk.StringVar(value="Listo para buscar.")
-        ttk.Label(
-            search_frame,
-            textvariable=self.search_status_var,
-            foreground="#1d5f91",
-            font=("Segoe UI", 9, "bold"),
-        ).pack(fill="x", pady=(2, 7))
-
-        ttk.Label(search_frame, text="Resultados:").pack(anchor="w")
-        self.search_results = scrolledtext.ScrolledText(
-            search_frame,
-            height=7,
-            font=("Consolas", 9),
-            state="disabled",
-        )
+        ttk.Label(search_frame, textvariable=self.search_status_var, foreground="#1d5f91", font=("Segoe UI", 9, "bold")).pack(fill="x", pady=(2, 7))
+        self.search_results = scrolledtext.ScrolledText(search_frame, height=5, font=("Consolas", 9), state="disabled")
         self.search_results.pack(fill="both", expand=True, pady=(3, 9))
 
-        link_frame = ttk.LabelFrame(
-            search_frame, text=" Enlace de la publicación encontrada ", padding=8
-        )
-        link_frame.pack(fill="x")
-        ttk.Label(
-            link_frame,
-            text=(
-                "En Facebook usa Compartir > Copiar enlace. Después captura el "
-                "portapapeles o pega el enlace aquí para conservarlo."
-            ),
-            wraplength=780,
-            justify="left",
-        ).pack(fill="x", pady=(0, 6))
-        link_row = ttk.Frame(link_frame)
-        link_row.pack(fill="x")
-        self.search_link_var = tk.StringVar()
-        ttk.Entry(link_row, textvariable=self.search_link_var).pack(
-            side="left", fill="x", expand=True
-        )
-        ttk.Button(
-            link_row,
-            text="Capturar portapapeles",
-            command=self.capture_link_from_clipboard,
-        ).pack(side="left", padx=(7, 0))
-
     def create_console_widget(self):
-        console_frame = ttk.LabelFrame(
-            self.root, text=" Consola de Estado y Operaciones ", padding=10
-        )
+        console_frame = ttk.LabelFrame(self.root, text=" Consola de Estado ", padding=10)
         console_frame.pack(fill="both", expand=True, padx=15, pady=10)
-
-        self.console = scrolledtext.ScrolledText(
-            console_frame,
-            bg="#1e1e1e",
-            fg="#00ff00",
-            font=("Consolas", 9),
-            insertbackground="white",
-        )
+        self.console = scrolledtext.ScrolledText(console_frame, bg="#1e1e1e", fg="#00ff00", font=("Consolas", 9), insertbackground="white", height=8)
         self.console.pack(fill="both", expand=True, padx=5, pady=5)
 
     def _drain_ui_queue(self):
-        """Procesa en el hilo de Tkinter los mensajes enviados por tareas ADB."""
         try:
             while True:
                 kind, payload = self.ui_queue.get_nowait()
-                if kind == "log" and hasattr(self, "console"):
+                if kind == "log":
                     self.console.insert(tk.END, payload + "\n")
                     self.console.see(tk.END)
                 elif kind == "call":
                     payload()
-        except queue.Empty:
-            pass
-        except tk.TclError:
-            return
+        except queue.Empty: pass
+        except tk.TclError: return
+        if not self.app_closing.is_set(): self.root.after(100, self._drain_ui_queue)
 
-        try:
-            self.root.after(100, self._drain_ui_queue)
-        except tk.TclError:
-            pass
-
-    def post_ui(self, callback):
-        self.ui_queue.put(("call", callback))
-
-    def log(self, message):
-        self.ui_queue.put(("log", str(message)))
+    def post_ui(self, callback): self.ui_queue.put(("call", callback))
+    def log(self, message): self.ui_queue.put(("log", str(message)))
 
     def on_close(self):
+        self.app_closing.set()
+        self.interaction_stop_event.set()
         self.search_stop_event.set()
-        for process in list(self.scrcpy_processes.values()):
-            try:
-                if process.poll() is None:
-                    process.terminate()
-            except Exception:
-                pass
+        self.human_stop_event.set()
+        self.report_stop_event.set()
+        for p in list(self.scrcpy_processes.values()):
+            try: p.terminate()
+            except: pass
         self.root.destroy()
 
     def get_selected_devices(self):
-        if not hasattr(self, "device_table"):
-            return []
-        return [serial for serial in self.device_table.selection() if serial in self.devices]
+        if not hasattr(self, "device_table"): return []
+        return [s for s in self.device_table.selection() if s in self.devices]
 
     def select_all_devices(self):
-        if self.devices:
-            self.device_table.selection_set(self.devices)
+        if self.devices: self.device_table.selection_set(self.devices)
         self.update_selection_label()
 
     def clear_device_selection(self):
         self.device_table.selection_remove(self.device_table.selection())
         self.update_selection_label()
 
-    def update_selection_label(self, _event=None):
-        count = len(self.get_selected_devices())
-        self.lbl_selection.config(
-            text=f"Seleccionados: {count} de {len(self.devices)}"
-        )
+    def update_selection_label(self, _e=None):
+        self.lbl_selection.config(text=f"Seleccionados: {len(self.get_selected_devices())} de {len(self.devices)}")
 
     def display_device_name(self, serial):
-        detail = self.device_details.get(serial, {})
-        return self.device_aliases.get(serial) or detail.get("model") or serial
+        return self.device_aliases.get(serial) or self.device_details.get(serial, {}).get("model") or serial
 
     def rename_selected_device(self):
         selected = self.get_selected_devices()
-        if len(selected) != 1:
-            messagebox.showwarning(
-                "Selecciona un celular",
-                "Selecciona exactamente un dispositivo para asignarle un nombre.",
-            )
-            return
+        if len(selected) != 1: return
         serial = selected[0]
-        current = self.device_aliases.get(serial, "")
-        alias = simpledialog.askstring(
-            "Nombre del dispositivo",
-            "Escribe un nombre o responsable para este celular:",
-            initialvalue=current,
-            parent=self.root,
-        )
-        if alias is None:
-            return
-        alias = alias.strip()
-        if alias:
-            self.device_aliases[serial] = alias
-        else:
-            self.device_aliases.pop(serial, None)
-        self.save_device_aliases()
-        self.update_device_row(serial)
-        self.log(f"Nombre actualizado para [{serial}]: {alias or '(sin alias)'}")
+        alias = simpledialog.askstring("Nombre", "Alias:", initialvalue=self.device_aliases.get(serial, ""), parent=self.root)
+        if alias is not None:
+            if alias.strip(): self.device_aliases[serial] = alias.strip()
+            else: self.device_aliases.pop(serial, None)
+            self.save_device_aliases()
+            self.update_device_row(serial)
 
     def query_device_details(self, serial):
         try:
-            output = self.adb_capture(
-                serial,
-                [
-                    "shell",
-                    "getprop ro.product.model; getprop ro.build.version.release",
-                ],
-                timeout=10,
-            )
-            values = [value.strip() for value in output.splitlines() if value.strip()]
-            return {
-                "model": values[0] if values else "Android",
-                "android": values[1] if len(values) > 1 else "",
-                "state": "Conectado",
-            }
-        except Exception as error:
-            return {"model": "Android", "android": "", "state": f"Error: {error}"}
+            output = self.adb_capture(serial, ["shell", "getprop ro.product.model; getprop ro.build.version.release"])
+            vals = [v.strip() for v in output.splitlines() if v.strip()]
+            return {"model": vals[0] if vals else "Android", "android": vals[1] if len(vals)>1 else "", "state": "Conectado"}
+        except: return {"model": "Android", "android": "", "state": "Error"}
 
     def update_device_row(self, serial):
-        if not hasattr(self, "device_table") or not self.device_table.exists(serial):
-            return
-        detail = self.device_details.get(serial, {})
-        self.device_table.item(
-            serial,
-            values=(
-                self.device_aliases.get(serial, ""),
-                detail.get("model", ""),
-                serial,
-                detail.get("android", ""),
-                detail.get("state", "Conectado"),
-                self.device_tasks.get(serial, "Listo"),
-            ),
-        )
+        if not hasattr(self, "device_table") or not self.device_table.exists(serial): return
+        det = self.device_details.get(serial, {})
+        self.device_table.item(serial, values=(self.device_aliases.get(serial, ""), det.get("model", ""), serial, det.get("android", ""), det.get("state", ""), self.device_tasks.get(serial, "Listo")))
 
     def set_device_task(self, serial, task):
         self.device_tasks[serial] = task
-        self.post_ui(lambda device=serial: self.update_device_row(device))
+        self.post_ui(lambda dev=serial: self.update_device_row(dev))
 
     def restore_device_task(self, serial, expected_task, previous_task):
         if self.device_tasks.get(serial) == expected_task:
-            if previous_task:
-                self.device_tasks[serial] = previous_task
-            else:
-                self.device_tasks.pop(serial, None)
+            if previous_task: self.device_tasks[serial] = previous_task
+            else: self.device_tasks.pop(serial, None)
             self.update_device_row(serial)
 
     def get_devices(self):
         try:
-            result = subprocess.run(
-                [self.adb, "devices"],
-                capture_output=True,
-                text=True,
-                encoding="utf-8",
-                errors="replace",
-                check=True,
-                creationflags=NO_WINDOW,
-            )
-            lines = result.stdout.strip().split("\n")[1:]
+            res = subprocess.run([self.adb, "devices"], capture_output=True, text=True, errors="replace", check=True, creationflags=NO_WINDOW)
             devices = []
-            for line in lines:
-                if "\tdevice" in line:
-                    devices.append(line.split("\t")[0])
+            for line in res.stdout.strip().split("\n")[1:]:
+                if "\t" in line:
+                    serial, state = line.split("\t")
+                    if state == "device":
+                        devices.append(serial)
             return devices
-        except Exception as e:
-            self.log(f"Error al escanear ADB: {e}")
+        except Exception:
             return []
 
-    def refresh_devices(self):
-        previous_selection = set(self.get_selected_devices())
-        self.devices = self.get_devices()
-        self.device_details = {
-            serial: self.query_device_details(serial) for serial in self.devices
-        }
-        existing_rows = set(self.device_table.get_children())
-        for serial in existing_rows - set(self.devices):
-            self.device_table.delete(serial)
-            self.device_tasks.pop(serial, None)
-        for serial in self.devices:
-            if not self.device_table.exists(serial):
-                self.device_table.insert("", "end", iid=serial)
-            self.update_device_row(serial)
+    def refresh_devices_async(self):
+        threading.Thread(target=self._refresh_devices_worker, daemon=True).start()
 
-        selected = [serial for serial in self.devices if serial in previous_selection]
-        if self.first_device_scan and self.devices:
-            selected = list(self.devices)
-        if selected:
-            self.device_table.selection_set(selected)
-        self.first_device_scan = False
-        count = len(self.devices)
-        self.lbl_devices.config(text=f"Dispositivos detectados: {count}")
-        self.update_selection_label()
-        self.log(f"Dispositivos actualizados correctamente. Total: {count}")
+    def _refresh_devices_worker(self):
+        new_devices = self.get_devices()
+        new_details = {s: self.query_device_details(s) for s in new_devices}
+        def update_ui():
+            prev_sel = set(self.get_selected_devices())
+            self.devices, self.device_details = new_devices, new_details
+            for s in set(self.device_table.get_children()) - set(self.devices):
+                self.device_table.delete(s)
+            for s in self.devices:
+                if not self.device_table.exists(s): self.device_table.insert("", "end", iid=s)
+                self.update_device_row(s)
+            sel = [s for s in self.devices if s in prev_sel]
+            if self.first_device_scan and self.devices: sel = list(self.devices)
+            if sel: self.device_table.selection_set(sel)
+            self.first_device_scan = False
+            self.lbl_devices.config(text=f"Dispositivos detectados: {len(self.devices)}")
+            self.update_selection_label()
+        self.post_ui(update_ui)
 
     def run_on_device(self, device, command, timeout=60):
         try:
-            full_cmd = [self.adb, "-s", device] + command
+            res = subprocess.run([self.adb, "-s", device] + command, capture_output=True, text=True, errors="replace", timeout=timeout, creationflags=NO_WINDOW)
+            if res.returncode != 0: return False, (res.stderr or res.stdout or f"Error").strip()
+            return True, res.stdout.strip()
+        except Exception as e: return False, str(e)
+
+    def adb_capture(self, device, command, timeout=30):
+        res = subprocess.run([self.adb, "-s", device] + command, capture_output=True, text=True, errors="replace", timeout=timeout, creationflags=NO_WINDOW)
+        if res.returncode != 0: raise RuntimeError((res.stderr or res.stdout).strip())
+        return res.stdout
+
+    def execute_multithreaded(self, task_func, task_name="Tarea"):
+        target_devs = self.get_selected_devices()
+        if not target_devs: return messagebox.showwarning("Aviso", "Selecciona al menos un dispositivo.")
+        for dev in target_devs:
+            def run(d=dev):
+                prev = self.device_tasks.get(d)
+                self.set_device_task(d, task_name)
+                try: task_func(d)
+                finally: self.post_ui(lambda x=d, p=prev: self.restore_device_task(x, task_name, p))
+            threading.Thread(target=run, daemon=True).start()
+
+    def claim_devices(self, devices, task_name):
+        """Evita que dos acciones controlen el mismo teléfono al mismo tiempo."""
+        with self.device_tasks_lock:
+            available = [device for device in devices if device not in self.busy_devices]
+            busy = [device for device in devices if device in self.busy_devices]
+            self.busy_devices.update(available)
+        if busy:
+            self.log(f"{task_name}: se omitieron equipos ocupados: {', '.join(busy)}")
+        return available, busy
+
+    def release_device(self, device):
+        with self.device_tasks_lock:
+            self.busy_devices.discard(device)
+
+    def is_facebook_url(self, value):
+        parsed = urlparse(value)
+        host = parsed.hostname.casefold() if parsed.hostname else ""
+        allowed_hosts = ("facebook.com", "fb.com", "fb.watch")
+        return (
+            parsed.scheme in {"http", "https"}
+            and any(host == allowed or host.endswith("." + allowed) for allowed in allowed_hosts)
+        )
+
+    def wait_or_cancel(self, seconds, stop_event=None):
+        deadline = time.monotonic() + max(0.0, seconds)
+        while True:
+            if self.app_closing.is_set() or (stop_event and stop_event.is_set()):
+                return True
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                return False
+            event = stop_event or self.app_closing
+            event.wait(min(remaining, 0.20))
+
+    def get_device_screen_size(self, device):
+        size = self.screen_size_cache.get(device)
+        if size:
+            return size
+        try:
+            output = self.adb_capture(device, ["shell", "wm", "size"], timeout=10)
+            matches = re.findall(r"(\d+)x(\d+)", output)
+            if not matches:
+                raise RuntimeError("Android no informó el tamaño de pantalla.")
+            size = tuple(map(int, matches[-1]))
+            self.screen_size_cache[device] = size
+            return size
+        except Exception as error:
+            self.log(f"[{device}] No se pudo leer el tamaño de pantalla: {error}")
+            return None
+
+    def open_selected_screens(self):
+        devs = self.get_selected_devices()
+        if not devs or not self.scrcpy: return
+        cols = max(1, math.ceil(math.sqrt(len(devs) * 0.8))) 
+        for i, dev in enumerate(devs):
+            if dev in self.scrcpy_processes and self.scrcpy_processes[dev].poll() is None: continue
+            x, y = (i % cols) * 320, (i // cols) * 640
+            cmd = [self.scrcpy, "-s", dev, "--window-title", self.display_device_name(dev), f"--window-x={x}", f"--window-y={y}", "--max-size=600", "--max-fps=24", "--bit-rate=2M"]
+            try:
+                proc = subprocess.Popen(cmd, cwd=str(Path(self.scrcpy).parent), creationflags=CREATE_NEW_CONSOLE)
+                self.scrcpy_processes[dev] = proc
+                self.set_device_task(dev, "Pantalla abierta")
+                threading.Thread(target=self.monitor_scrcpy_process, args=(dev, proc), daemon=True).start()
+            except Exception as e: self.log(f"Error scrcpy [{dev}]: {e}")
+
+    def monitor_scrcpy_process(self, dev, proc):
+        proc.wait()
+        if self.scrcpy_processes.get(dev) is proc:
+            self.scrcpy_processes.pop(dev, None)
+            self.post_ui(lambda: self.restore_device_task(dev, "Pantalla abierta", None))
+
+    def close_selected_screens(self):
+        for dev in self.get_selected_devices():
+            if dev in self.scrcpy_processes: self.scrcpy_processes[dev].terminate()
+
+    def open_facebook_all(self):
+        def task(dev):
+            for pkg in ["com.facebook.lite", "com.facebook.katana"]:
+                res = subprocess.run([self.adb, "-s", dev, "shell", "monkey", "-p", pkg, "-c", "android.intent.category.LAUNCHER", "1"], capture_output=True, text=True, errors="replace", creationflags=NO_WINDOW)
+                if res.returncode == 0 and "Error" not in res.stdout:
+                    self.log(f"-> Facebook abierto en: {dev}"); return
+            self.log(f"-> No se pudo abrir Facebook en {dev}")
+        self.execute_multithreaded(task, "Abrir Facebook")
+
+    def simular_navegacion_organica(self, device, duracion_min_sec=5.0, duracion_max_sec=15.0, stop_event=None):
+        duration = random.uniform(duracion_min_sec, duracion_max_sec)
+        end_time = time.time() + duration
+        self.log(f"[{device}] ☕ Calentamiento orgánico en Feed ({duration:.1f}s)...")
+        size = self.screen_size_cache.get(device)
+        if not size:
+            try: o = self.adb_capture(device, ["shell", "wm", "size"], timeout=10); size = self.screen_size_cache[device] = tuple(map(int, re.findall(r"(\d+)x(\d+)", o)[-1]))
+            except Exception: size = (1080, 1920)
+        w, h = size
+        while time.time() < end_time and not self.app_closing.is_set() and not (stop_event and stop_event.is_set()):
+            accion = random.choice(["scroll_abajo", "scroll_arriba", "pausa_lectura"])
+            if accion == "scroll_abajo":
+                self.scroll_device_once_random(device)
+                if self.wait_or_cancel(random.uniform(1.5, 3.5), stop_event): return False
+            elif accion == "scroll_arriba":
+                cx, sy, ey = (w // 2) + random.randint(-40, 40), int(h * 0.30), int(h * 0.70)
+                self.run_on_device(device, ["shell", "input", "swipe", str(cx), str(sy), str(cx), str(ey), str(random.randint(400, 600))])
+                if self.wait_or_cancel(random.uniform(1.8, 3.8), stop_event): return False
+            elif accion == "pausa_lectura":
+                if self.wait_or_cancel(random.uniform(2.5, 5.0), stop_event): return False
+        self.log(f"[{device}] ✓ Calentamiento completado.")
+        return not self.app_closing.is_set() and not (stop_event and stop_event.is_set())
+
+    def scroll_device_once_random(self, dev):
+        size = self.screen_size_cache.get(dev)
+        if not size:
+            try: o = self.adb_capture(dev, ["shell", "wm", "size"], timeout=10); size = self.screen_size_cache[dev] = tuple(map(int, re.findall(r"(\d+)x(\d+)", o)[-1]))
+            except Exception: size = (1080, 1920)
+        w, h = size
+        cx = (w // 2) + random.randint(-28, 28)
+        sy = int(h * (0.78 + random.uniform(-0.02, 0.02)))
+        ey = int(h * (0.25 + random.uniform(-0.02, 0.02)))
+        # Un gesto breve y amplio evita que Facebook interprete el final como toque
+        # o pulsación prolongada sobre una tarjeta, enlace o anuncio.
+        self.run_on_device(
+            dev,
+            ["shell", "input", "touchscreen", "swipe", str(cx), str(sy), str(cx), str(ey), str(random.randint(210, 300))],
+        )
+
+    @staticmethod
+    def normalize_search_text(value): return "".join(c for c in unicodedata.normalize("NFKD", value.casefold()) if not unicodedata.combining(c))
+
+    def prepare_search_terms(self, keys):
+        """Normaliza cada alternativa que el usuario separó explícitamente."""
+        prepared = []
+        for original in keys:
+            normalized = re.sub(r"\s+", " ", self.normalize_search_text(original)).strip()
+            if normalized and normalized not in {item[1] for item in prepared}:
+                prepared.append((original.strip(), normalized))
+        return dict(prepared)
+
+    @staticmethod
+    def phrase_matches_text(normalized_phrase, normalized_text):
+        if not normalized_phrase or not normalized_text:
+            return False
+        phrase_pattern = re.escape(normalized_phrase).replace(r"\ ", r"\s+")
+        return bool(re.search(r"(?<!\w)" + phrase_pattern + r"(?!\w)", normalized_text))
+
+    def get_android_hierarchy(self, device):
+        safe_device = re.sub(r"[^A-Za-z0-9_.-]", "_", device)
+        remote_xml = f"/sdcard/window_dump_panel_{safe_device}.xml"
+        with self.uiautomator_lock:
+            self.adb_capture(device, ["shell", "uiautomator", "dump", remote_xml], timeout=20)
+            xml = self.adb_capture(device, ["exec-out", "cat", remote_xml], timeout=20)
+        if xml:
+            try: return ET.fromstring(xml)
+            except: pass
+        return None
+
+    def extract_visible_text(self, hierarchy):
+        parts = []
+        for n in hierarchy.iter("node"):
+            for attr in ("text", "content-desc"):
+                val = n.attrib.get(attr, "").strip()
+                if val: parts.append(val)
+        return "\n".join(dict.fromkeys(parts))
+
+    def accessibility_text_records(self, hierarchy):
+        records = []
+        seen = set()
+        if hierarchy is None:
+            return records
+        for node in hierarchy.iter("node"):
+            bounds = self.parse_node_bounds(node)
+            if not bounds:
+                continue
+            for attribute in ("text", "content-desc"):
+                value = node.attrib.get(attribute, "").strip()
+                key = (value, bounds)
+                if not value or key in seen:
+                    continue
+                seen.add(key)
+                records.append({"text": value, "bounds": bounds, "source": "accessibility"})
+        return records
+
+    def windows_ocr_records(self, device):
+        if not OPENCV_AVAILABLE:
+            return []
+        screen = self.capture_device_screen(device)
+        if screen is None:
+            return []
+        script_path = BASE_DIR / "herramientas" / "ocr_windows.ps1"
+        if not script_path.exists():
+            return []
+        temp_path = None
+        try:
+            handle = tempfile.NamedTemporaryFile(prefix="panel_ocr_", suffix=".png", delete=False)
+            temp_path = handle.name
+            handle.close()
+            if not cv2.imwrite(temp_path, screen):
+                return []
             result = subprocess.run(
-                full_cmd,
+                [
+                    "powershell.exe", "-NoProfile", "-ExecutionPolicy", "Bypass",
+                    "-File", str(script_path), "-ImagePath", temp_path,
+                ],
                 capture_output=True,
                 text=True,
                 encoding="utf-8",
                 errors="replace",
-                check=True,
-                timeout=timeout,
+                timeout=25,
                 creationflags=NO_WINDOW,
             )
-            return True, result.stdout.strip()
-        except Exception as e:
-            self.log(f"Error en [{device}]: {e}")
-            return False, str(e)
+            if result.returncode != 0 or not result.stdout.strip():
+                if not self.ocr_warning_shown:
+                    self.ocr_warning_shown = True
+                    self.log(f"OCR local no disponible: {(result.stderr or result.stdout).strip()}")
+                return []
+            payload = json.loads(result.stdout)
+            if isinstance(payload, dict):
+                payload = [payload]
+            records = []
+            for item in payload:
+                text_value = str(item.get("text", "")).strip()
+                bounds = tuple(int(item[name]) for name in ("left", "top", "right", "bottom"))
+                if text_value and bounds[2] > bounds[0] and bounds[3] > bounds[1]:
+                    words = []
+                    for word in item.get("words", []):
+                        word_text = str(word.get("text", "")).strip()
+                        word_bounds = tuple(int(word[name]) for name in ("left", "top", "right", "bottom"))
+                        if word_text and word_bounds[2] > word_bounds[0] and word_bounds[3] > word_bounds[1]:
+                            words.append({"text": word_text, "bounds": word_bounds})
+                    records.append({"text": text_value, "bounds": bounds, "source": "ocr", "words": words})
+            return records
+        except Exception as error:
+            if not self.ocr_warning_shown:
+                self.ocr_warning_shown = True
+                self.log(f"OCR local no disponible: {error}")
+            return []
+        finally:
+            if temp_path:
+                try:
+                    os.unlink(temp_path)
+                except OSError:
+                    pass
 
-    def adb_capture(self, device, command, timeout=30):
-        """Ejecuta ADB y devuelve texto o genera un error descriptivo."""
-        result = subprocess.run(
-            [self.adb, "-s", device] + command,
-            capture_output=True,
-            text=True,
-            encoding="utf-8",
-            errors="replace",
-            timeout=timeout,
-            creationflags=NO_WINDOW,
-        )
-        if result.returncode != 0:
-            detail = (result.stderr or result.stdout or "Error ADB").strip()
-            raise RuntimeError(detail)
-        return result.stdout
-
-    def execute_multithreaded(self, task_func, task_name="Tarea", devices=None):
-        target_devices = list(devices if devices is not None else self.get_selected_devices())
-        if not target_devices:
-            messagebox.showwarning(
-                "Aviso", "Selecciona al menos un dispositivo conectado."
-            )
-            return
-
-        def run_task(device):
-            previous_task = self.device_tasks.get(device)
-            self.set_device_task(device, task_name)
-            try:
-                task_func(device)
-            finally:
-                self.post_ui(
-                    lambda dev=device, name=task_name, previous=previous_task: self.restore_device_task(
-                        dev, name, previous
-                    )
-                )
-
-        for dev in target_devices:
-            threading.Thread(target=run_task, args=(dev,), daemon=True).start()
-
-    def open_selected_screens(self):
-        devices = self.get_selected_devices()
-        if not devices:
-            messagebox.showwarning(
-                "Sin selección", "Selecciona al menos un dispositivo para verlo."
-            )
-            return
-        if not self.scrcpy or not Path(self.scrcpy).exists():
-            messagebox.showerror(
-                "Falta scrcpy",
-                "No se encontró scrcpy dentro de la carpeta herramientas.",
-            )
-            return
-
-        screen_width = self.root.winfo_screenwidth()
-        screen_height = self.root.winfo_screenheight()
-        columns = max(1, math.ceil(math.sqrt(len(devices))))
-        rows = max(1, math.ceil(len(devices) / columns))
-        window_width = max(320, screen_width // columns)
-        window_height = max(420, (screen_height - 80) // rows)
-
-        for index, device in enumerate(devices):
-            existing = self.scrcpy_processes.get(device)
-            if existing and existing.poll() is None:
-                self.log(f"La pantalla de [{device}] ya está abierta.")
+    def hierarchy_timestamp_records(self, hierarchy, screen_size):
+        """Recupera la fila de fecha por geometría cuando Facebook oculta su texto."""
+        if hierarchy is None or not screen_size:
+            return []
+        width, height = screen_size
+        nodes = list(hierarchy.iter("node"))
+        records = []
+        for header in nodes:
+            if header.attrib.get("clickable", "false").casefold() != "true":
                 continue
+            bounds = self.parse_node_bounds(header)
+            if not bounds:
+                continue
+            left, top, right, bottom = bounds
+            box_width, box_height = right - left, bottom - top
+            if not width * 0.12 <= left <= width * 0.25:
+                continue
+            if not width * 0.45 <= box_width <= width * 0.70:
+                continue
+            if not height * 0.045 <= box_height <= height * 0.16:
+                continue
+            candidates = []
+            for node in nodes:
+                if node.attrib.get("class", "") != "android.view.View":
+                    continue
+                if node.attrib.get("clickable", "false").casefold() == "true":
+                    continue
+                if node.attrib.get("text", "").strip() or node.attrib.get("content-desc", "").strip():
+                    continue
+                child = self.parse_node_bounds(node)
+                if not child:
+                    continue
+                c_left, c_top, c_right, c_bottom = child
+                child_width, child_height = c_right - c_left, c_bottom - c_top
+                if not (left <= c_left and c_right <= right and top <= c_top and c_bottom <= bottom):
+                    continue
+                if abs(c_left - left) > width * 0.035:
+                    continue
+                if c_top < top + box_height * 0.45:
+                    continue
+                if not width * 0.08 <= child_width <= width * 0.25:
+                    continue
+                if not height * 0.015 <= child_height <= height * 0.04:
+                    continue
+                candidates.append(child)
+            if not candidates:
+                continue
+            candidates.sort(key=lambda item: item[1], reverse=True)
+            timestamp_bounds = candidates[0]
+            key = (timestamp_bounds[0], timestamp_bounds[1], timestamp_bounds[2], timestamp_bounds[3])
+            if any(record["bounds"] == key for record in records):
+                continue
+            records.append({
+                "text": "[fecha/hora visual]",
+                "bounds": key,
+                "source": "estructura geométrica",
+                "timestamp_candidate": True,
+            })
+        return records
 
-            title = self.display_device_name(device)
-            x = (index % columns) * window_width
-            y = (index // columns) * window_height
-            command = [
-                self.scrcpy,
-                "-s",
-                device,
-                "--window-title",
-                title,
-                "--max-size=900",
-                "--no-audio",
-                "--stay-awake",
-                f"--window-x={x}",
-                f"--window-y={y}",
-                f"--window-width={window_width}",
-                f"--window-height={window_height}",
-            ]
-            try:
-                process = subprocess.Popen(
-                    command,
-                    cwd=str(Path(self.scrcpy).parent),
-                    creationflags=NO_WINDOW,
-                )
-                self.scrcpy_processes[device] = process
-                self.set_device_task(device, "Pantalla abierta")
-                self.log(f"Pantalla abierta para [{device}] como '{title}'.")
-                threading.Thread(
-                    target=self.monitor_scrcpy_process,
-                    args=(device, process),
-                    daemon=True,
-                ).start()
-            except Exception as error:
-                self.log(f"No se pudo abrir scrcpy para [{device}]: {error}")
+    def find_see_more_controls(self, records, screen_size):
+        if not records or not screen_size:
+            return []
+        width, height = screen_size
+        excluded = ("comentario", "respuesta", "resultado", "grupo", "persona", "traduccion")
+        controls = []
+        for record in records:
+            text_value = self.normalize_search_text(record.get("text", "")).strip()
+            bounds = record.get("bounds")
+            if not bounds or "ver mas" not in text_value:
+                continue
+            if any(term in text_value for term in excluded):
+                continue
+            if not re.search(r"(?:\.{2,}\s*)?ver mas\s*$", text_value):
+                continue
+            left, top, right, bottom = bounds
+            center_y = (top + bottom) // 2
+            if not height * 0.16 <= center_y <= height * 0.90:
+                continue
+            if self.has_ad_label_above(records, center_y, height, max_distance_ratio=0.22):
+                continue
+            point = None
+            words = record.get("words", [])
+            for index in range(len(words) - 1, 0, -1):
+                current = self.normalize_search_text(words[index].get("text", "")).strip(". ")
+                previous = self.normalize_search_text(words[index - 1].get("text", "")).strip(". ")
+                if current == "mas" and previous == "ver":
+                    p_bounds = words[index - 1]["bounds"]
+                    c_bounds = words[index]["bounds"]
+                    point = ((p_bounds[0] + c_bounds[2]) // 2, (min(p_bounds[1], c_bounds[1]) + max(p_bounds[3], c_bounds[3])) // 2)
+                    break
+            if point is None:
+                if text_value in {"ver mas", "... ver mas", "… ver mas"}:
+                    point = ((left + right) // 2, center_y)
+                else:
+                    point = (max(left, right - min(50, max(18, (right - left) // 10))), center_y)
+            controls.append({"point": point, "text": record["text"], "source": record.get("source", "unknown")})
+        controls.sort(key=lambda item: item["point"][1])
+        return controls
 
-    def monitor_scrcpy_process(self, device, process):
-        process.wait()
-        if self.scrcpy_processes.get(device) is process:
-            self.scrcpy_processes.pop(device, None)
-            self.post_ui(
-                lambda dev=device: self.restore_device_task(
-                    dev, "Pantalla abierta", None
-                )
+    def is_ad_label_record(self, record):
+        text_value = self.normalize_search_text(record.get("text", "")).strip()
+        bounds = record.get("bounds")
+        if not text_value or not bounds or len(text_value) > 32:
+            return False
+        return bool(re.match(
+            r"^(?:publicidad|patrocinad[oa]|sponsored|anuncio|advertisement)(?:\s|[·•.]|$)",
+            text_value,
+        ))
+
+    def is_open_post_view(self, records, screen_size):
+        """Detecta una publicación abierta fuera del flujo de coincidencia validada."""
+        if not records or not screen_size:
+            return False
+        _, height = screen_size
+        top_text = []
+        bottom_editor = False
+        comment_action_count = 0
+        for record in records:
+            bounds = record.get("bounds")
+            if not bounds:
+                continue
+            text_value = self.normalize_search_text(record.get("text", "")).strip()
+            if not text_value:
+                continue
+            center_y = (bounds[1] + bounds[3]) / 2.0
+            if center_y <= height * 0.16:
+                top_text.append(text_value)
+            if center_y >= height * 0.84 and any(label in text_value for label in (
+                "escribe un comentario", "comenta como", "write a comment", "comment as",
+            )):
+                bottom_editor = True
+            if any(label in text_value for label in ("responder", "reply")):
+                comment_action_count += 1
+        header = " ".join(top_text)
+        explicit_header = bool(re.search(r"\b(?:publicacion|post)\s+de\b", header))
+        return explicit_header or (bottom_editor and comment_action_count >= 2)
+
+    def has_ad_label_above(self, records, target_y, screen_height, max_distance_ratio=0.30):
+        for record in records:
+            if not self.is_ad_label_record(record):
+                continue
+            bounds = record["bounds"]
+            label_y = (bounds[1] + bounds[3]) / 2.0
+            distance = target_y - label_y
+            if 0 <= distance <= screen_height * max_distance_ratio:
+                return True
+        return False
+
+    def expand_visible_see_more(self, device, screen_size, max_expansions=3):
+        attempted = set()
+        last_hierarchy = None
+        last_accessibility = []
+        last_ocr = None
+        expanded = 0
+        for _ in range(max_expansions + 1):
+            last_hierarchy = self.get_android_hierarchy(device)
+            last_accessibility = self.accessibility_text_records(last_hierarchy)
+            last_ocr = self.windows_ocr_records(device)
+            combined_records = last_accessibility + last_ocr
+            if self.is_open_post_view(combined_records, screen_size):
+                break
+            if any(self.is_ad_label_record(record) for record in combined_records):
+                self.log(f"[{device}] Publicidad visible; no se pulsa Ver más.")
+                break
+            controls = self.find_see_more_controls(combined_records, screen_size)
+            if not controls or expanded >= max_expansions:
+                break
+            control = controls[0]
+            point = control["point"]
+            key = (round(point[0] / 12), round(point[1] / 12), self.normalize_search_text(control["text"]))
+            if key in attempted:
+                break
+            attempted.add(key)
+            ok, detail = self.run_on_device(
+                device, ["shell", "input", "tap", str(point[0]), str(point[1])], timeout=15
             )
-            self.log(f"Pantalla cerrada para [{device}].")
+            if not ok:
+                self.log(f"[{device}] Se encontró Ver más, pero no se pudo pulsar: {detail}")
+                break
+            expanded += 1
+            self.log(f"[{device}] Ver más expandido en {point} mediante {control['source']}.")
+            if self.wait_or_cancel(0.8, self.search_stop_event):
+                break
+        return last_hierarchy, last_accessibility, last_ocr, expanded
 
-    def close_selected_screens(self):
-        devices = self.get_selected_devices()
-        if not devices:
-            messagebox.showwarning(
-                "Sin selección", "Selecciona los dispositivos cuyas ventanas cerrarás."
-            )
-            return
-        closed = 0
-        for device in devices:
-            process = self.scrcpy_processes.get(device)
-            if process and process.poll() is None:
-                process.terminate()
-                closed += 1
-        self.log(f"Se solicitó cerrar {closed} ventana(s) de dispositivo.")
+    def is_post_timestamp_record(self, record, screen_size):
+        text_value = self.normalize_search_text(record.get("text", "")).strip()
+        bounds = record.get("bounds")
+        if not text_value or not bounds or not screen_size:
+            return False
+        if record.get("timestamp_candidate"):
+            return True
+        width, height = screen_size
+        left, top, right, bottom = bounds
+        center_x, center_y = (left + right) / 2.0, (top + bottom) / 2.0
+        if center_y < height * 0.15 or center_x > width * 0.62:
+            return False
+        if right - left > width * 0.48 or len(text_value) > 38:
+            return False
+        standard = re.match(
+            r"^(?:hace\s+)?\d{1,3}\s*(?:min(?:uto)?s?|m|h|hora?s?|d|dia?s?|sem(?:ana)?s?|a|ano?s?)\b",
+            text_value,
+        )
+        if standard:
+            return True
+        embedded = re.search(
+            r"(?:^|\s|[^\w\s])\d{1,3}\s*(?:min(?:uto)?s?|m|h|hora?s?|d|dia?s?|sem(?:ana)?s?|a|ano?s?)\b",
+            text_value,
+        )
+        if embedded:
+            return True
+        # OCR puede leer la h pequeña como "11" (por ejemplo: 9 h -> 911).
+        compact = re.sub(r"\s+", "", text_value)
+        if re.match(r"^\d{1,2}(?:11|ii|ll|l1)(?:\W.*)?$", compact):
+            return True
+        begins_with_number = bool(re.match(r"^\d{1,3}", text_value))
+        has_audience_separator = "·" in text_value or "•" in text_value
+        return begins_with_number and has_audience_separator
+
+    def post_timestamp_click_point(self, record):
+        bounds = record.get("bounds")
+        if not bounds:
+            return None
+        words = record.get("words", [])
+        unit_pattern = re.compile(r"^(?:min(?:uto)?s?|m|h|hora?s?|d|dia?s?|sem(?:ana)?s?|a|ano?s?)$")
+        compact_time = re.compile(r"^\d{1,3}(?:min|m|h|d|sem|a)$")
+        ocr_h = re.compile(r"^\d{1,2}(?:11|ii|ll|l1)$")
+        for index, word in enumerate(words):
+            normalized = self.normalize_search_text(word.get("text", "")).strip(" ·•.�")
+            word_bounds = word.get("bounds")
+            if not normalized or not word_bounds:
+                continue
+            if compact_time.match(normalized) or ocr_h.match(normalized):
+                return ((word_bounds[0] + word_bounds[2]) // 2, (word_bounds[1] + word_bounds[3]) // 2)
+            if unit_pattern.match(normalized) and index > 0:
+                previous = words[index - 1]
+                previous_text = self.normalize_search_text(previous.get("text", "")).strip(" ·•.�")
+                previous_bounds = previous.get("bounds")
+                if previous_text.isdigit() and previous_bounds:
+                    return (
+                        (previous_bounds[0] + word_bounds[2]) // 2,
+                        (min(previous_bounds[1], word_bounds[1]) + max(previous_bounds[3], word_bounds[3])) // 2,
+                    )
+        left, top, right, bottom = bounds
+        return ((left + right) // 2, (top + bottom) // 2)
+
+    def find_post_match_snapshot(self, records, normalized_keywords, screen_size):
+        if not records or not normalized_keywords or not screen_size:
+            return None
+        width, height = screen_size
+        usable = []
+        for record in records:
+            bounds = record.get("bounds")
+            text_value = record.get("text", "").strip()
+            if not bounds or not text_value:
+                continue
+            if bounds[3] <= height * 0.14:
+                continue
+            usable.append(record)
+        usable.sort(key=lambda record: (record["bounds"][1], record["bounds"][0]))
+        timestamps = [record for record in usable if self.is_post_timestamp_record(record, screen_size)]
+        if not timestamps:
+            return None
+        candidates = []
+        for start in range(len(usable)):
+            joined_parts = []
+            left, top, right, bottom = usable[start]["bounds"]
+            previous_bottom = bottom
+            for end in range(start, min(len(usable), start + 5)):
+                record = usable[end]
+                r_left, r_top, r_right, r_bottom = record["bounds"]
+                if end > start and r_top - previous_bottom > height * 0.075:
+                    break
+                joined_parts.append(record["text"])
+                left, top = min(left, r_left), min(top, r_top)
+                right, bottom = max(right, r_right), max(bottom, r_bottom)
+                previous_bottom = r_bottom
+                joined = " ".join(joined_parts)
+                normalized_joined = self.normalize_search_text(joined)
+                matches = [
+                    original for original, normalized in normalized_keywords.items()
+                    if self.phrase_matches_text(normalized, normalized_joined)
+                ]
+                if not matches:
+                    continue
+                anchor_y = (top + bottom) / 2.0
+                if self.has_ad_label_above(usable, anchor_y, height, max_distance_ratio=0.85):
+                    continue
+                nearby_timestamps = []
+                for timestamp in timestamps:
+                    t_bounds = timestamp["bounds"]
+                    timestamp_y = (t_bounds[1] + t_bounds[3]) / 2.0
+                    delta = anchor_y - timestamp_y
+                    if -height * 0.12 <= delta <= height * 0.40:
+                        penalty = abs(delta) + (height * 0.035 if delta < 0 else 0)
+                        nearby_timestamps.append((penalty, timestamp_y, timestamp))
+                if not nearby_timestamps:
+                    continue
+                nearby_timestamps.sort(key=lambda item: item[0])
+                _, timestamp_y, timestamp = nearby_timestamps[0]
+                t_left, t_top, t_right, t_bottom = timestamp["bounds"]
+                preview_records = [
+                    item["text"] for item in usable
+                    if timestamp_y - height * 0.13 <= (item["bounds"][1] + item["bounds"][3]) / 2.0 <= timestamp_y + height * 0.35
+                ]
+                preview = " ".join(preview_records)[:280]
+                candidates.append({
+                    "matches": matches,
+                    "preview": preview or joined,
+                    "timestamp_text": timestamp["text"],
+                    "timestamp_point": self.post_timestamp_click_point(timestamp),
+                    "timestamp_y": timestamp_y,
+                    "source": timestamp.get("source", record.get("source", "unknown")),
+                    "fingerprint": self.normalize_search_text(preview or joined),
+                })
+                break
+        if not candidates:
+            return None
+        candidates.sort(key=lambda item: item["timestamp_y"])
+        return candidates[0]
 
     @staticmethod
-    def normalize_search_text(value):
-        decomposed = unicodedata.normalize("NFKD", value.casefold())
-        return "".join(char for char in decomposed if not unicodedata.combining(char))
-
-    def parse_search_keywords(self):
-        raw = self.search_keywords.get("1.0", tk.END)
-        keywords = [item.strip() for item in re.split(r"[,;\n]+", raw) if item.strip()]
-        return list(dict.fromkeys(keywords))
-
-    def get_android_hierarchy(self, device):
-        """Obtiene la jerarquía accesible de la pantalla actual."""
-        remote_xml = "/sdcard/window_dump_panel.xml"
-        self.adb_capture(
-            device,
-            ["shell", "uiautomator", "dump", remote_xml],
-            timeout=20,
+    def parse_node_bounds(node):
+        match = re.fullmatch(
+            r"\[(\d+),(\d+)\]\[(\d+),(\d+)\]",
+            node.attrib.get("bounds", ""),
         )
-        xml_data = self.adb_capture(
-            device,
-            ["exec-out", "cat", remote_xml],
-            timeout=20,
-        )
-        return ET.fromstring(xml_data)
+        if not match:
+            return None
+        left, top, right, bottom = map(int, match.groups())
+        if right <= left or bottom <= top:
+            return None
+        return left, top, right, bottom
 
-    @staticmethod
-    def extract_visible_text(hierarchy):
-        visible_parts = []
-        for node in hierarchy.iter("node"):
-            for attribute in ("text", "content-desc"):
-                value = node.attrib.get(attribute, "").strip()
-                if value:
-                    visible_parts.append(value)
-        return "\n".join(dict.fromkeys(visible_parts))
+    def normalized_node_labels(self, node):
+        return {
+            self.normalize_search_text(node.attrib.get(attribute, "").strip())
+            for attribute in ("text", "content-desc")
+            if node.attrib.get(attribute, "").strip()
+        }
 
-    def get_visible_android_text(self, device):
-        """Obtiene el texto expuesto por la accesibilidad de la pantalla actual."""
-        return self.extract_visible_text(self.get_android_hierarchy(device))
-
-    def find_expand_more_points(self, hierarchy):
-        """Localiza únicamente controles visibles con etiqueta exacta Ver más."""
-        accepted_labels = {"ver mas", "see more"}
-        points = []
-        seen = set()
+    def find_accessible_control(
+        self,
+        hierarchy,
+        exact_labels=(),
+        prefix_labels=(),
+        screen_size=None,
+        ignore_top_pct=0.0,
+        allow_nonclickable=False,
+    ):
+        """Devuelve el centro de un rótulo accesible validado."""
+        if hierarchy is None:
+            return None
+        exact = {self.normalize_search_text(value) for value in exact_labels}
+        prefixes = tuple(self.normalize_search_text(value) for value in prefix_labels)
+        candidates = []
         for node in hierarchy.iter("node"):
             if node.attrib.get("visible-to-user", "true").casefold() == "false":
                 continue
             if node.attrib.get("enabled", "true").casefold() == "false":
                 continue
-            labels = {
-                self.normalize_search_text(node.attrib.get(attribute, "").strip())
-                for attribute in ("text", "content-desc")
-                if node.attrib.get(attribute, "").strip()
-            }
-            if not labels.intersection(accepted_labels):
+            labels = self.normalized_node_labels(node)
+            priority = None
+            if labels.intersection(exact):
+                priority = 0
+            elif any(label.startswith(prefix) for label in labels for prefix in prefixes):
+                priority = 1
+            if priority is None:
                 continue
-            match = re.fullmatch(
-                r"\[(\d+),(\d+)\]\[(\d+),(\d+)\]",
-                node.attrib.get("bounds", ""),
+            if (
+                not allow_nonclickable
+                and node.attrib.get("clickable", "false").casefold() != "true"
+            ):
+                continue
+            bounds = self.parse_node_bounds(node)
+            if not bounds:
+                continue
+            left, top, right, bottom = bounds
+            center = ((left + right) // 2, (top + bottom) // 2)
+            if screen_size and center[1] <= screen_size[1] * ignore_top_pct:
+                continue
+            candidates.append((priority, center[1], center))
+        if not candidates:
+            return None
+        candidates.sort(key=lambda item: (item[0], item[1]))
+        return candidates[0][2]
+
+    def find_bottom_editable_control(self, hierarchy, screen_size):
+        """Localiza un editor inferior, incluido MultiAutoCompleteTextView de FB Lite."""
+        if hierarchy is None or not screen_size:
+            return None
+        screen_width, screen_height = screen_size
+        candidates = []
+        geometric = []
+        for node in hierarchy.iter("node"):
+            class_name = node.attrib.get("class", "").casefold()
+            editable = node.attrib.get("editable", "false").casefold() == "true"
+            if node.attrib.get("visible-to-user", "true").casefold() == "false":
+                continue
+            if node.attrib.get("enabled", "true").casefold() == "false":
+                continue
+            bounds = self.parse_node_bounds(node)
+            if not bounds:
+                continue
+            left, top, right, bottom = bounds
+            center = ((left + right) // 2, (top + bottom) // 2)
+            recognized_editor = "edittext" in class_name or "autocompletetextview" in class_name or editable
+            if recognized_editor and center[1] >= screen_height * 0.55:
+                tap_x = screen_width // 2 if left <= screen_width // 2 <= right else center[0]
+                priority = 0 if "autocompletetextview" in class_name else 1
+                candidates.append((priority, -center[1], (tap_x, center[1])))
+                continue
+            box_width, box_height = right - left, bottom - top
+            if (
+                center[1] >= screen_height * 0.86
+                and screen_width * 0.32 <= box_width <= screen_width * 0.72
+                and screen_height * 0.012 <= box_height <= screen_height * 0.075
+                and screen_width * 0.08 <= left <= screen_width * 0.30
+                and right >= screen_width * 0.55
+            ):
+                tap_x = screen_width // 2 if left <= screen_width // 2 <= right else center[0]
+                geometric.append((-center[1], (tap_x, center[1])))
+        if candidates:
+            candidates.sort(key=lambda item: (item[0], item[1]))
+            return candidates[0][2]
+        if geometric:
+            geometric.sort(key=lambda item: item[0])
+            return geometric[0][1]
+        return None
+
+    def find_keyword_anchor_y(self, hierarchy, normalized_keywords):
+        for node in hierarchy.iter("node"):
+            if node.attrib.get("visible-to-user", "true").casefold() == "false":
+                continue
+            labels = self.normalized_node_labels(node)
+            if not any(keyword in label for label in labels for keyword in normalized_keywords):
+                continue
+            bounds = self.parse_node_bounds(node)
+            if bounds:
+                return (bounds[1] + bounds[3]) // 2
+        return None
+
+    def find_like_control(self, hierarchy, anchor_y=None):
+        """Localiza Me gusta o su estado activo sin depender de coordenadas fijas."""
+        if hierarchy is None:
+            return "not_found", None
+        exact_like = {"me gusta", "like"}
+        exact_unlike = {"quitar me gusta", "unlike", "remove like"}
+        controls = []
+        for node in hierarchy.iter("node"):
+            if node.attrib.get("visible-to-user", "true").casefold() == "false":
+                continue
+            if node.attrib.get("enabled", "true").casefold() == "false":
+                continue
+            labels = self.normalized_node_labels(node)
+            exact_unlike_match = bool(labels.intersection(exact_unlike))
+            unlike = exact_unlike_match or any(
+                re.match(
+                    r'^(?:boton\s+["“]?quitar me gusta|quitar me gusta(?:,?\s*boton)?|["“]?unlike["”]?(?:,?\s*button)?|remove like\b)',
+                    label,
+                )
+                for label in labels
             )
-            if not match:
+            exact_like_match = bool(labels.intersection(exact_like))
+            like = exact_like_match or any(
+                re.match(
+                    r'^(?:boton\s+["“]?me gusta["”]?(?:\.|$)|me gusta,?\s*boton(?:\.|$)|["“]?like["”]?,?\s*button(?:\.|$))',
+                    label,
+                )
+                for label in labels
+            )
+            if not like and not unlike:
                 continue
-            left, top, right, bottom = map(int, match.groups())
-            if right <= left or bottom <= top:
+            bounds = self.parse_node_bounds(node)
+            if not bounds:
                 continue
+            left, top, right, bottom = bounds
             point = ((left + right) // 2, (top + bottom) // 2)
-            if point not in seen:
-                seen.add(point)
-                points.append(point)
-        return points
-
-    def expand_visible_more(self, device, hierarchy, maximum, wait_seconds):
-        """Expande controles Ver más con límite y vuelve a leer tras cada toque."""
-        current_hierarchy = hierarchy
-        expanded = 0
-        tapped_points = set()
-        while expanded < maximum and not self.search_stop_event.is_set():
-            candidates = [
-                point
-                for point in self.find_expand_more_points(current_hierarchy)
-                if point not in tapped_points
-            ]
-            if not candidates:
-                break
-            x, y = candidates[0]
-            tapped_points.add((x, y))
-            ok, detail = self.run_on_device(
-                device,
-                ["shell", "input", "tap", str(x), str(y)],
-                timeout=15,
+            selected = (
+                unlike
+                or node.attrib.get("selected", "false").casefold() == "true"
+                or node.attrib.get("checked", "false").casefold() == "true"
             )
-            if not ok:
-                self.log(f"No se pudo expandir 'Ver más' en [{device}]: {detail}")
-                break
-            expanded += 1
-            self.log(f"Se expandió 'Ver más' en [{device}] ({expanded}/{maximum}).")
-            if self.search_stop_event.wait(wait_seconds):
-                break
-            current_hierarchy = self.get_android_hierarchy(device)
-        return expanded, current_hierarchy
+            # Facebook Lite puede publicar el texto exacto en un hijo no pulsable;
+            # tocar el centro de sus límites entrega el evento al contenedor padre.
+            # Las descripciones extendidas siguen exigiendo un nodo pulsable.
+            if (
+                not selected
+                and not exact_like_match
+                and node.attrib.get("clickable", "false").casefold() != "true"
+            ):
+                continue
+            distance = abs(point[1] - anchor_y) if anchor_y is not None else point[1]
+            controls.append((distance, "already_liked" if selected else "available", point))
+        if not controls:
+            return "not_found", None
+        controls.sort(key=lambda item: item[0])
+        _, state, point = controls[0]
+        return state, point
 
-    def get_screen_size(self, device):
-        output = self.adb_capture(device, ["shell", "wm", "size"], timeout=10)
-        matches = re.findall(r"(\d+)x(\d+)", output)
-        if not matches:
-            raise RuntimeError("No se pudo determinar el tamaño de pantalla.")
-        width, height = matches[-1]
-        return int(width), int(height)
-
-    def scroll_device_once(self, device):
-        size = self.screen_size_cache.get(device)
-        if size is None:
-            size = self.get_screen_size(device)
-            self.screen_size_cache[device] = size
-        width, height = size
-        center_x = width // 2
-        start_y = int(height * 0.78)
-        end_y = int(height * 0.28)
+    def apply_like_action(self, device, hierarchy, anchor_y=None, stop_event=None):
+        state, point = self.find_like_control(hierarchy, anchor_y)
+        if state == "already_liked":
+            self.log(f"[{device}] La publicación ya tenía Me gusta; no se tocó.")
+            return "already_liked"
+        if state == "not_found":
+            self.log(f"[{device}] No se encontró un control accesible Me gusta.")
+            return "not_found"
+        x, y = point
         ok, detail = self.run_on_device(
-            device,
-            [
-                "shell",
-                "input",
-                "swipe",
-                str(center_x),
-                str(start_y),
-                str(center_x),
-                str(end_y),
-                "450",
-            ],
-            timeout=15,
+            device, ["shell", "input", "tap", str(x), str(y)], timeout=15
         )
         if not ok:
-            raise RuntimeError(detail)
+            self.log(f"[{device}] No se pudo tocar Me gusta: {detail}")
+            return "error"
+        if self.wait_or_cancel(0.8, stop_event):
+            return "cancelled"
+        try:
+            updated = self.get_android_hierarchy(device)
+            updated_state, _ = self.find_like_control(updated, anchor_y)
+            if updated_state == "already_liked":
+                self.log(f"[{device}] Me gusta confirmado por accesibilidad.")
+                return "confirmed"
+        except Exception as error:
+            self.log(f"[{device}] No se pudo verificar Me gusta: {error}")
+        self.log(f"[{device}] Toque Me gusta enviado; estado no confirmado.")
+        return "sent_unconfirmed"
 
-    def append_search_result(self, message):
+    def find_reel_side_control(self, hierarchy, screen_size, action):
+        """Identifica Me gusta/Comentario en la columna lateral de un Reel."""
+        if hierarchy is None or not screen_size or action not in {"like", "comment"}:
+            return None
+        width, height = screen_size
+        candidates = []
+        for node in hierarchy.iter("node"):
+            if node.attrib.get("visible-to-user", "true").casefold() == "false":
+                continue
+            if node.attrib.get("enabled", "true").casefold() == "false":
+                continue
+            if node.attrib.get("clickable", "false").casefold() != "true":
+                continue
+            bounds = self.parse_node_bounds(node)
+            if not bounds:
+                continue
+            left, top, right, bottom = bounds
+            box_width, box_height = right - left, bottom - top
+            point = ((left + right) // 2, (top + bottom) // 2)
+            # En Facebook Lite los controles del Reel forman una columna de
+            # bloques pulsables a la derecha: Me gusta, Comentario y Compartir.
+            if point[0] < width * 0.80:
+                continue
+            if not height * 0.50 <= point[1] <= height * 0.89:
+                continue
+            if box_width > width * 0.24 or not height * 0.035 <= box_height <= height * 0.13:
+                continue
+            candidates.append(point)
+        if not candidates:
+            return None
+        candidates.sort(key=lambda point: point[1])
+        distinct = []
+        for point in candidates:
+            if not distinct or point[1] - distinct[-1][1] > height * 0.045:
+                distinct.append(point)
+        index = 0 if action == "like" else 1
+        return distinct[index] if len(distinct) > index else None
+
+    def is_reel_like_active(self, screen, point):
+        if not OPENCV_AVAILABLE or screen is None or not point:
+            return False
+        height, width = screen.shape[:2]
+        radius = max(22, int(width * 0.055))
+        x, y = point
+        patch = screen[max(0, y-radius):min(height, y+radius), max(0, x-radius):min(width, x+radius)]
+        if patch.size == 0:
+            return False
+        hsv = cv2.cvtColor(patch, cv2.COLOR_BGR2HSV)
+        blue = cv2.inRange(hsv, np.array([90, 70, 65]), np.array([135, 255, 255]))
+        return float(np.count_nonzero(blue)) / float(blue.size) >= 0.035
+
+    def locate_reel_side_figure(self, screen, action):
+        """Respaldo visual para las dos primeras siluetas blancas del Reel."""
+        if not OPENCV_AVAILABLE or screen is None or action not in {"like", "comment"}:
+            return None
+        height, width = screen.shape[:2]
+        gray = cv2.cvtColor(screen, cv2.COLOR_BGR2GRAY)
+        mask = cv2.inRange(gray, 170, 255)
+        mask[:int(height * 0.50), :] = 0
+        mask[int(height * 0.89):, :] = 0
+        mask[:, :int(width * 0.80)] = 0
+        contours, _ = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+        candidates = []
+        for contour in contours:
+            x, y, box_width, box_height = cv2.boundingRect(contour)
+            point = (x + box_width // 2, y + box_height // 2)
+            if point[0] < width * 0.87:
+                continue
+            if not width * 0.04 <= box_width <= width * 0.13:
+                continue
+            if not height * 0.025 <= box_height <= height * 0.09:
+                continue
+            area = cv2.contourArea(contour)
+            if area < width * height * 0.0007:
+                continue
+            candidates.append((point[1], point, area))
+        if not candidates:
+            return None
+        candidates.sort(key=lambda item: item[0])
+        distinct = []
+        for candidate in candidates:
+            if not distinct or candidate[0] - distinct[-1][0] > height * 0.045:
+                distinct.append(candidate)
+            elif candidate[2] > distinct[-1][2]:
+                distinct[-1] = candidate
+        index = 0 if action == "like" else 1
+        if len(distinct) <= index:
+            return None
+        point = distinct[index][1]
+        return {"point": point, "active": self.is_reel_like_active(screen, point)}
+
+    def apply_reel_action(self, device, action, hierarchy, screen_size, stop_event=None):
+        screen = self.capture_device_screen(device)
+        point = self.find_reel_side_control(hierarchy, screen_size, action)
+        source = "estructura lateral"
+        visual = self.locate_reel_side_figure(screen, action)
+        if point is None and visual:
+            point = visual["point"]
+            source = "silueta lateral"
+        if point is None:
+            self.log(f"[{device}] No se identificó el control lateral de {action} en el Reel.")
+            return "not_found"
+        if action == "like" and (
+            (visual and visual.get("active")) or self.is_reel_like_active(screen, point)
+        ):
+            self.log(f"[{device}] El Me gusta del Reel ya aparece activo; no se tocó.")
+            return "already_liked"
+        ok, detail = self.run_on_device(
+            device, ["shell", "input", "tap", str(point[0]), str(point[1])], timeout=15
+        )
+        if not ok:
+            self.log(f"[{device}] Se identificó {action} del Reel, pero el toque falló: {detail}")
+            return "error"
+        self.log(f"[{device}] Control {action} de Reel pulsado en {point} mediante {source}.")
+        if action == "comment":
+            return "sent"
+        if self.wait_or_cancel(0.9, stop_event):
+            return "cancelled"
+        updated = self.capture_device_screen(device)
+        updated_match = self.locate_reel_side_figure(updated, "like")
+        if updated_match and updated_match.get("active"):
+            self.log(f"[{device}] Me gusta del Reel confirmado visualmente.")
+            return "confirmed"
+        self.log(f"[{device}] Toque de Me gusta del Reel enviado; estado no confirmado.")
+        return "sent_unconfirmed"
+
+    def append_search_result(self, msg):
         self.search_results.config(state="normal")
-        self.search_results.insert(tk.END, message + "\n")
+        self.search_results.insert(tk.END, msg + "\n")
         self.search_results.see(tk.END)
         self.search_results.config(state="disabled")
 
     def clear_search_results(self):
-        if self.search_running:
-            messagebox.showwarning("Búsqueda activa", "Detén la búsqueda antes de limpiar.")
-            return
-        self.search_results.config(state="normal")
-        self.search_results.delete("1.0", tk.END)
-        self.search_results.config(state="disabled")
+        if self.search_running: return
+        self.search_results.config(state="normal"); self.search_results.delete("1.0", tk.END); self.search_results.config(state="disabled")
         self.search_status_var.set("Listo para buscar.")
 
     def start_keyword_search(self):
-        if self.search_running:
-            return
-
-        keywords = self.parse_search_keywords()
-        if not keywords:
-            messagebox.showwarning(
-                "Faltan palabras", "Escribe al menos una palabra o frase para buscar."
-            )
-            return
-
+        keys = [k.strip() for k in re.split(r"[,;\n]+", self.search_keywords.get("1.0", tk.END)) if k.strip()]
+        if not keys or not self.get_selected_devices(): return messagebox.showwarning("Aviso", "Escribe palabras clave y selecciona al menos un celular.")
+        comment_on_match = bool(self.search_comment_var.get())
+        comment_text = self.search_comment_text_var.get().strip()
+        if comment_on_match and not comment_text:
+            return messagebox.showwarning("Aviso", "Escribe el comentario que se enviará en las publicaciones coincidentes.")
         try:
-            interval = float(self.search_interval_var.get().replace(",", "."))
-            max_scrolls = int(self.search_max_scrolls_var.get())
-            max_expansions = int(self.search_max_expansions_var.get())
-            expand_wait = float(
-                self.search_expand_wait_var.get().replace(",", ".")
-            )
+            like_min = int(self.search_like_min_var.get())
+            like_max = int(self.search_like_max_var.get())
+            if not 1 <= like_min <= 60 or not 1 <= like_max <= 60 or like_min > like_max:
+                raise ValueError
         except ValueError:
-            messagebox.showwarning(
-                "Valores incorrectos",
-                "Los intervalos deben ser numéricos y los máximos deben ser enteros.",
-            )
-            return
-
-        if not 0.5 <= interval <= 60:
-            messagebox.showwarning(
-                "Intervalo incorrecto", "Usa un intervalo de 0.5 a 60 segundos."
-            )
-            return
-        if not 1 <= max_scrolls <= 200:
-            messagebox.showwarning(
-                "Límite incorrecto", "Usa un máximo de 1 a 200 desplazamientos."
-            )
-            return
-        if not 1 <= max_expansions <= 10:
-            messagebox.showwarning(
-                "Límite incorrecto", "Usa de 1 a 10 expansiones por pantalla."
-            )
-            return
-        if not 0.2 <= expand_wait <= 5:
-            messagebox.showwarning(
-                "Espera incorrecta", "Usa una espera de 0.2 a 5 segundos."
-            )
-            return
-
-        expand_more = bool(self.search_expand_more_var.get())
-
-        selected_devices = self.get_selected_devices()
-        connected_devices = set(self.get_devices())
-        devices = [device for device in selected_devices if device in connected_devices]
+            return messagebox.showwarning("Intervalo no válido", "Usa mínimo y máximo enteros de 1 a 60; mínimo no puede superar máximo.")
+        devices, busy = self.claim_devices(self.get_selected_devices(), "Búsqueda")
         if not devices:
-            messagebox.showwarning(
-                "Sin dispositivos seleccionados",
-                "Selecciona al menos un celular autorizado y vuelve a intentar.",
-            )
-            return
-
-        self.search_stop_event.clear()
-        self.screen_size_cache.clear()
+            return messagebox.showwarning("Equipos ocupados", "Los equipos seleccionados ya ejecutan otra acción.")
+        if busy:
+            messagebox.showinfo("Equipos ocupados", "Se omitieron equipos que ya ejecutan otra acción.")
         self.search_devices = list(devices)
-        self.search_running = True
-        self.btn_start_search.config(state="disabled")
-        self.btn_stop_search.config(state="normal")
-        self.search_status_var.set("Búsqueda en curso...")
-        self.append_search_result(
-            f"[{time.strftime('%H:%M:%S')}] Inicio · {len(devices)} dispositivo(s) · "
-            f"palabras: {', '.join(keywords)} · "
-            f"expandir Ver más: {'sí' if expand_more else 'no'}"
-        )
-        self.log(
-            f"Búsqueda por palabras iniciada en {len(devices)} dispositivo(s)."
-        )
         for device in devices:
             self.set_device_task(device, "Búsqueda por palabras")
-
+        self.search_stop_event.clear(); self.search_running = True
+        self.btn_start_search.config(state="disabled"); self.btn_stop_search.config(state="normal")
+        self.search_status_var.set("Búsqueda en curso...")
         threading.Thread(
             target=self.keyword_search_worker,
             args=(
                 devices,
-                keywords,
-                interval,
-                max_scrolls,
-                expand_more,
-                max_expansions,
-                expand_wait,
+                keys,
+                bool(self.search_like_var.get()),
+                comment_on_match,
+                comment_text,
+                like_min,
+                like_max,
+                bool(self.search_continuous_var.get()),
             ),
             daemon=True,
         ).start()
 
-    def stop_keyword_search(self):
-        if self.search_running:
-            self.search_stop_event.set()
-            self.search_status_var.set("Deteniendo búsqueda...")
-            self.log("Se solicitó detener la búsqueda por palabras.")
+    def perform_search_post_like(self, device):
+        size = self.get_device_screen_size(device)
+        if not size:
+            return "screen_error"
+        width, height = size
+        for attempt in range(9):
+            hierarchy = self.get_android_hierarchy(device)
+            result = self.apply_like_action(device, hierarchy, stop_event=self.search_stop_event)
+            if result == "not_found":
+                result = self.apply_calculated_figure_action(device, "like", self.search_stop_event)
+            if result != "not_found":
+                return result
+            if attempt < 8:
+                ok, _ = self.run_on_device(
+                    device,
+                    ["shell", "input", "swipe", str(width//2), str(int(height*0.80)), str(width//2), str(int(height*0.32)), "700"],
+                    timeout=15,
+                )
+                if not ok or self.wait_or_cancel(0.9, self.search_stop_event):
+                    break
+        return "not_found"
+
+    def find_comment_text_above_editor(self, records, expected_text, screen_size):
+        if not records or not expected_text or not screen_size:
+            return False
+        width, height = screen_size
+        expected = self.normalize_search_text(expected_text)
+        expected = re.sub(r"[^\w\s]", " ", expected, flags=re.UNICODE)
+        expected = re.sub(r"\s+", " ", expected).strip()
+        if len(expected) < 3:
+            return False
+        editor_top = int(height * 0.98)
+        section_top = int(height * 0.55)
+        section_headers = []
+        for record in records:
+            normalized = self.normalize_search_text(record.get("text", "")).strip()
+            bounds = record.get("bounds")
+            if not normalized or not bounds:
+                continue
+            if normalized.startswith(("escribe un comentario", "write a comment", "comenta como", "comentar como", "comment as", "add a comment")):
+                editor_top = min(editor_top, bounds[1])
+            if any(label in normalized for label in ("mas relevantes", "mas recientes", "todos los comentarios")):
+                section_headers.append(bounds[3])
+        if section_headers:
+            section_top = max(section_headers)
+        eligible = []
+        for record in records:
+            bounds = record.get("bounds")
+            text_value = record.get("text", "").strip()
+            if not bounds or not text_value:
+                continue
+            center_y = (bounds[1] + bounds[3]) // 2
+            normalized = self.normalize_search_text(text_value).strip()
+            if normalized.startswith(("escribe un comentario", "write a comment", "comenta como", "comentar como", "comment as", "add a comment")):
+                continue
+            if center_y < section_top or bounds[3] >= editor_top - 3:
+                continue
+            eligible.append(record)
+        eligible.sort(key=lambda record: (record["bounds"][1], record["bounds"][0]))
+        for start in range(len(eligible)):
+            parts = []
+            previous_bottom = eligible[start]["bounds"][3]
+            for end in range(start, min(len(eligible), start + 6)):
+                record = eligible[end]
+                if end > start and record["bounds"][1] - previous_bottom > height * 0.06:
+                    break
+                parts.append(record["text"])
+                previous_bottom = record["bounds"][3]
+                combined = self.normalize_search_text(" ".join(parts))
+                combined = re.sub(r"[^\w\s]", " ", combined, flags=re.UNICODE)
+                combined = re.sub(r"\s+", " ", combined).strip()
+                if expected in combined:
+                    return True
+                length_ratio = min(len(expected), len(combined)) / max(1, max(len(expected), len(combined)))
+                if length_ratio >= 0.72 and SequenceMatcher(None, expected, combined).ratio() >= 0.88:
+                    return True
+        return False
+
+    def published_comment_visible(self, device, expected_text, checks=5, delay=1.0):
+        size = self.get_device_screen_size(device)
+        if not size:
+            return False
+        for attempt in range(max(1, checks)):
+            hierarchy = self.get_android_hierarchy(device)
+            records = self.accessibility_text_records(hierarchy)
+            records.extend(self.windows_ocr_records(device))
+            visible_text = self.normalize_search_text(" ".join(record.get("text", "") for record in records))
+            if any(message in visible_text for message in (
+                "se publico tu comentario",
+                "tu comentario se publico",
+                "comentario publicado",
+                "your comment was posted",
+                "comment posted",
+            )):
+                self.log(f"[{device}] Comentario confirmado por el aviso de publicación de Facebook.")
+                return True
+            if self.find_comment_text_above_editor(records, expected_text, size):
+                self.log(f"[{device}] Comentario confirmado por su texto visible sobre el editor.")
+                return True
+            if attempt + 1 < checks and self.wait_or_cancel(delay, self.search_stop_event):
+                return False
+        return False
+
+    def perform_search_post_comment_once(self, device, comment_text):
+        size = self.get_device_screen_size(device)
+        if not size:
+            return "screen_error"
+        width, height = size
+        comment_point = None
+        comment_opened = False
+        for attempt in range(9):
+            hierarchy = self.get_android_hierarchy(device)
+            comment_point = self.find_accessible_control(
+                hierarchy,
+                exact_labels=("escribe un comentario", "write a comment", "comenta como", "comment as"),
+                prefix_labels=("escribe un comentario", "write a comment", "comenta como", "comentar como", "comment as", "add a comment"),
+                screen_size=size,
+                ignore_top_pct=0.20,
+                allow_nonclickable=True,
+            ) or self.find_bottom_editable_control(hierarchy, size)
+            if comment_point:
+                break
+            if not comment_opened:
+                result = self.apply_calculated_figure_action(device, "comment", self.search_stop_event)
+                if result == "sent":
+                    comment_opened = True
+                    if self.wait_or_cancel(1.3, self.search_stop_event):
+                        return "cancelled"
+                    continue
+            if attempt < 8:
+                ok, _ = self.run_on_device(
+                    device,
+                    ["shell", "input", "swipe", str(width//2), str(int(height*0.72)), str(width//2), str(int(height*0.34)), "650"],
+                    timeout=15,
+                )
+                if not ok or self.wait_or_cancel(0.9, self.search_stop_event):
+                    break
+        if not comment_point:
+            return "field_not_found"
+        ok, _ = self.run_on_device(
+            device, ["shell", "input", "tap", str(comment_point[0]), str(comment_point[1])], timeout=15
+        )
+        if not ok or self.wait_or_cancel(0.8, self.search_stop_event):
+            return "field_error"
+        self.clear_focused_text(device, 500)
+        if self.wait_or_cancel(0.3, self.search_stop_event):
+            return "cancelled"
+        if not self.inject_text_adb(device, comment_text):
+            return "write_error"
+        if self.wait_or_cancel(0.9, self.search_stop_event):
+            return "cancelled"
+        text_verified = self.visible_text_contains(device, comment_text)
+        if not text_verified:
+            text_verified = bool(self.locate_blue_send_arrow(self.capture_device_screen(device)))
+        if not text_verified:
+            self.clear_focused_text(device, len(comment_text))
+            return "text_not_verified"
+        hierarchy = self.get_android_hierarchy(device)
+        publish_point = self.find_accessible_control(
+            hierarchy,
+            exact_labels=("publicar", "publicar comentario", "enviar comentario", "post", "send"),
+            prefix_labels=("publicar comentario", "enviar comentario", "post comment", "send comment"),
+            screen_size=size,
+            allow_nonclickable=True,
+        )
+        if publish_point:
+            ok, _ = self.run_on_device(
+                device, ["shell", "input", "tap", str(publish_point[0]), str(publish_point[1])], timeout=15
+            )
+            if not ok:
+                return "send_error"
+        elif not self.tap_blue_send_arrow(
+            device, attempts=3, delay=0.45, stop_event=self.search_stop_event
+        ):
+            return "send_not_found"
+        if self.wait_or_cancel(1.5, self.search_stop_event):
+            return "cancelled"
+        return "sent" if self.published_comment_visible(device, comment_text, checks=5, delay=1.0) else "not_confirmed"
+
+    def perform_search_post_comment(self, device, comment_text):
+        last_result = "not_confirmed"
+        for attempt in range(2):
+            last_result = self.perform_search_post_comment_once(device, comment_text)
+            if last_result == "sent":
+                return "sent" if attempt == 0 else "sent_after_retry"
+            if last_result == "cancelled" or self.search_stop_event.is_set():
+                return last_result
+            if attempt == 0:
+                if self.wait_or_cancel(1.5, self.search_stop_event):
+                    return "cancelled"
+                if self.published_comment_visible(device, comment_text, checks=2, delay=1.2):
+                    return "sent_late_confirmed"
+                self.log(f"[{device}] El comentario no apareció sobre el editor; se realizará un único reintento.")
+                if self.wait_or_cancel(0.8, self.search_stop_event):
+                    return "cancelled"
+        self.log(f"[{device}] El comentario no se confirmó después del reintento; se continuará con la siguiente publicación.")
+        return "not_confirmed_after_retry"
+
+    def return_to_feed_after_post(self, device):
+        self.run_on_device(device, ["shell", "input", "keyevent", "4"])
+        if self.wait_or_cancel(1.1, self.search_stop_event):
+            return
+        size = self.get_device_screen_size(device) or (1080, 1920)
+        screen_height = size[1]
+        hierarchy = self.get_android_hierarchy(device)
+        records = self.accessibility_text_records(hierarchy)
+        top_text = " ".join(
+            record["text"] for record in records if record["bounds"][1] < screen_height * 0.18
+        ) if records else ""
+        if "facebook" not in self.normalize_search_text(top_text):
+            ocr_records = self.windows_ocr_records(device)
+            top_text = " ".join(
+                record["text"] for record in ocr_records if record["bounds"][1] < screen_height * 0.18
+            )
+        if "facebook" not in self.normalize_search_text(top_text):
+            self.run_on_device(device, ["shell", "input", "keyevent", "4"])
+            self.wait_or_cancel(1.0, self.search_stop_event)
 
     def keyword_search_worker(
         self,
         devices,
-        keywords,
-        interval,
-        max_scrolls,
-        expand_more=False,
-        max_expansions=3,
-        expand_wait=0.7,
+        keys,
+        like_on_match=False,
+        comment_on_match=False,
+        comment_text="",
+        like_min=3,
+        like_max=8,
+        continuous=True,
     ):
-        normalized_keywords = {
-            keyword: self.normalize_search_text(keyword) for keyword in keywords
-        }
-        found_result = None
-        completed_scrolls = 0
-        total_expansions = 0
-        errors = []
-
-        for step in range(max_scrolls + 1):
-            if self.search_stop_event.is_set():
-                break
-            cycle_started = time.monotonic()
-
-            for device in devices:
-                if self.search_stop_event.is_set():
-                    break
+        norm_keys = self.prepare_search_terms(keys)
+        step = 0
+        max_scrolls = 20
+        seen = set()
+        found_count = 0
+        ad_guard = {device: 0 for device in devices}
+        while not self.search_stop_event.is_set() and (continuous or step < max_scrolls):
+            stop_after_match = False
+            for dev in devices:
+                if self.search_stop_event.is_set(): break
                 try:
-                    hierarchy = self.get_android_hierarchy(device)
-                    visible_text = self.extract_visible_text(hierarchy)
-                    normalized_text = self.normalize_search_text(visible_text)
-                    matches = [
-                        original
-                        for original, normalized in normalized_keywords.items()
-                        if normalized in normalized_text
-                    ]
-                    expanded = 0
-                    if not matches and expand_more:
-                        expanded, hierarchy = self.expand_visible_more(
-                            device,
-                            hierarchy,
-                            max_expansions,
-                            expand_wait,
+                    size = self.get_device_screen_size(dev)
+                    if not size:
+                        continue
+                    hierarchy, accessibility_records, cached_ocr, _ = self.expand_visible_see_more(dev, size)
+                    geometry_records = self.hierarchy_timestamp_records(hierarchy, size)
+                    ocr_records = cached_ocr if cached_ocr is not None else self.windows_ocr_records(dev)
+                    records = accessibility_records + ocr_records + geometry_records
+                    if self.is_open_post_view(records, size):
+                        self.log(
+                            f"[{dev}] Facebook abrió una publicación durante el scroll sin coincidencia validada; "
+                            "se regresa al feed sin ejecutar acciones."
                         )
-                        total_expansions += expanded
-                        if expanded and not self.search_stop_event.is_set():
-                            visible_text = self.extract_visible_text(hierarchy)
-                            normalized_text = self.normalize_search_text(visible_text)
-                            matches = [
-                                original
-                                for original, normalized in normalized_keywords.items()
-                                if normalized in normalized_text
-                            ]
-                    if matches:
-                        found_result = (
-                            device,
-                            matches,
-                            step,
-                            visible_text,
-                            expanded,
-                        )
-                        self.search_stop_event.set()
+                        self.run_on_device(dev, ["shell", "input", "keyevent", "4"])
+                        ad_guard[dev] = 2
+                        self.wait_or_cancel(1.2, self.search_stop_event)
+                        continue
+                    ad_visible = any(self.is_ad_label_record(record) for record in records)
+                    if ad_visible:
+                        ad_guard[dev] = 2
+                        self.log(f"[{dev}] Publicidad detectada; se ignora el bloque completo y su continuación.")
+                        continue
+                    if ad_guard[dev] > 0:
+                        ad_guard[dev] -= 1
+                        self.log(f"[{dev}] Se omite la continuación visible del bloque publicitario.")
+                        continue
+                    snapshot = self.find_post_match_snapshot(records, norm_keys, size)
+                    if snapshot is None:
+                        continue
+                    fingerprint = (dev, hash(snapshot["fingerprint"]))
+                    if fingerprint in seen:
+                        continue
+                    if len(seen) >= 1000:
+                        seen.clear()
+                    seen.add(fingerprint)
+                    point = snapshot["timestamp_point"]
+                    self.log(
+                        f"[{dev}] Coincidencia asociada a fecha/hora '{snapshot['timestamp_text']}' "
+                        f"por {snapshot['source']}; abriendo en {point}."
+                    )
+                    ok, detail = self.run_on_device(
+                        dev, ["shell", "input", "tap", str(point[0]), str(point[1])], timeout=15
+                    )
+                    if not ok:
+                        self.log(f"[{dev}] No se pudo abrir la publicación coincidente: {detail}")
+                        continue
+                    if self.wait_or_cancel(1.8, self.search_stop_event):
                         break
-                except Exception as error:
-                    errors.append(f"{device}: {error}")
-                    self.log(f"Error analizando pantalla de [{device}]: {error}")
-
-            if found_result or self.search_stop_event.is_set():
+                    like_result = None
+                    comment_result = None
+                    if like_on_match or comment_on_match:
+                        chosen_wait = random.randint(like_min, like_max)
+                        self.post_ui(
+                            lambda d=dev, s=chosen_wait: self.search_status_var.set(
+                                f"Publicación abierta en {d}; acciones en {s} s. Pulsa Detener para cancelar."
+                            )
+                        )
+                        if self.wait_or_cancel(chosen_wait, self.search_stop_event):
+                            break
+                    if like_on_match:
+                        like_result = self.perform_search_post_like(dev)
+                    if comment_on_match and not self.search_stop_event.is_set():
+                        comment_result = self.perform_search_post_comment(
+                            dev, self.parse_spintax(comment_text)
+                        )
+                    found_count += 1
+                    ctx = {
+                        "device": dev,
+                        "matches": snapshot["matches"],
+                        "preview": snapshot["preview"],
+                        "timestamp": snapshot["timestamp_text"],
+                    }
+                    details = []
+                    if like_result:
+                        details.append(f"Me gusta: {like_result}")
+                    if comment_result:
+                        details.append(f"Comentario: {comment_result}")
+                    suffix = f" · {' · '.join(details)}" if details else " · publicación abierta"
+                    status = "La búsqueda continúa; pulsa Detener." if continuous else "Coincidencia encontrada."
+                    self.post_ui(
+                        lambda m=(
+                            f"Coincidencia #{found_count} en {dev}: "
+                            f"{', '.join(snapshot['matches'])}{suffix}"
+                        ), st=status, c=ctx: self.report_match(m, st, c)
+                    )
+                    if comment_result and comment_result not in {"sent", "sent_late_confirmed", "sent_after_retry", "cancelled"}:
+                        self.log(
+                            f"[{dev}] Comentario sin confirmación final ({comment_result}); "
+                            "se saldrá de la publicación y continuará la búsqueda."
+                        )
+                    self.return_to_feed_after_post(dev)
+                    if not continuous:
+                        stop_after_match = True
+                        break
+                except Exception as e: self.log(f"Error {dev}: {e}")
+            if stop_after_match or self.search_stop_event.is_set():
                 break
-            if step >= max_scrolls:
+            for dev in devices:
+                if not self.search_stop_event.is_set():
+                    self.scroll_device_once_random(dev)
+            step += 1
+            if self.search_stop_event.wait(2.0):
                 break
-
-            for device in devices:
-                if self.search_stop_event.is_set():
-                    break
-                try:
-                    self.scroll_device_once(device)
-                except Exception as error:
-                    errors.append(f"{device}: {error}")
-                    self.log(f"Error desplazando pantalla de [{device}]: {error}")
-            completed_scrolls += 1
-            elapsed = time.monotonic() - cycle_started
-            remaining = max(0.0, interval - elapsed)
-            if self.search_stop_event.wait(remaining):
-                break
-
-        if found_result:
-            device, matches, step, visible_text, expanded = found_result
-            preview = " ".join(visible_text.split())[:240]
-            expansion_detail = (
-                f" · {expanded} expansión(es) en la pantalla coincidente"
-                if expanded
-                else ""
-            )
-            result_message = (
-                f"[{time.strftime('%H:%M:%S')}] COINCIDENCIA en {device} · "
-                f"{', '.join(matches)} · después de {step} desplazamiento(s)"
-                f"{expansion_detail}\n"
-                f"Vista previa: {preview}"
-            )
-            status = f"Coincidencia encontrada en {device}. Revisa la pantalla."
-            self.log(
-                f"Coincidencia encontrada en [{device}]: {', '.join(matches)}."
-            )
-        elif self.search_stop_event.is_set():
-            result_message = (
-                f"[{time.strftime('%H:%M:%S')}] Búsqueda detenida · "
-                f"{completed_scrolls} desplazamiento(s) · "
-                f"{total_expansions} expansión(es)."
-            )
-            status = "Búsqueda detenida por el operador."
+        if self.search_stop_event.is_set():
+            message, status = f"Búsqueda detenida manualmente. Coincidencias: {found_count}.", "Detenida"
+        elif stop_after_match:
+            message, status = "Búsqueda detenida en la primera coincidencia.", "Coincidencia encontrada"
         else:
-            result_message = (
-                f"[{time.strftime('%H:%M:%S')}] Sin coincidencias · "
-                f"límite de {max_scrolls} desplazamiento(s) alcanzado · "
-                f"{total_expansions} expansión(es)."
-            )
-            status = "Búsqueda terminada sin coincidencias."
+            message, status = "Búsqueda completada sin coincidencias nuevas.", "Completada"
+        self.post_ui(lambda m=message, s=status: self.finish_search(m, s))
 
-        if errors:
-            result_message += f"\nAvisos técnicos: {len(errors)}"
+    def report_match(self, msg, status, ctx):
+        self.append_search_result(msg); self.pending_search_match = ctx; self.search_status_var.set(status)
 
-        self.post_ui(
-            lambda message=result_message, final_status=status: self.finish_keyword_search(
-                message, final_status
-            )
-        )
-
-    def finish_keyword_search(self, message, status):
-        self.append_search_result(message)
-        self.search_status_var.set(status)
-        self.btn_start_search.config(state="normal")
-        self.btn_stop_search.config(state="disabled")
+    def finish_search(self, msg, status):
+        self.append_search_result(msg); self.search_status_var.set(status)
+        self.btn_start_search.config(state="normal"); self.btn_stop_search.config(state="disabled")
         self.search_running = False
         for device in self.search_devices:
             self.restore_device_task(device, "Búsqueda por palabras", None)
+            self.release_device(device)
         self.search_devices = []
 
-    def capture_link_from_clipboard(self):
-        try:
-            value = self.root.clipboard_get().strip()
-        except tk.TclError:
-            messagebox.showwarning(
-                "Portapapeles vacío",
-                "Copia primero el enlace de la publicación desde Facebook.",
-            )
-            return
-
-        parsed = urlparse(value)
-        if parsed.scheme not in ("http", "https") or not parsed.netloc:
-            messagebox.showwarning(
-                "Contenido no válido", "El portapapeles no contiene un enlace web."
-            )
-            return
-
-        host = parsed.netloc.casefold().split(":")[0]
-        facebook_hosts = ("facebook.com", "fb.com", "fb.watch")
-        if not any(host == item or host.endswith("." + item) for item in facebook_hosts):
-            messagebox.showwarning(
-                "Enlace no reconocido",
-                "El enlace no parece pertenecer a Facebook. Revísalo antes de guardarlo.",
-            )
-            return
-
-        self.search_link_var.set(value)
-        self.append_search_result(
-            f"[{time.strftime('%H:%M:%S')}] Enlace capturado: {value}"
-        )
-        self.log("Enlace de publicación capturado desde el portapapeles.")
-
-    def open_facebook_all(self):
-        self.log("Abriendo Facebook en los dispositivos seleccionados...")
-
-        def task(dev):
-            opened = False
-            for pkg in ["com.facebook.katana", "com.facebook.lite"]:
-                res = subprocess.run(
-                    [self.adb, "-s", dev, "shell", "monkey", "-p", pkg, "-c", "android.intent.category.LAUNCHER", "1"],
-                    capture_output=True,
-                    text=True,
-                    encoding="utf-8",
-                    errors="replace",
-                    creationflags=NO_WINDOW,
-                )
-                if "No activities found" not in res.stdout and "Error" not in res.stdout and res.returncode == 0:
-                    opened = True
-                    break
-            if opened:
-                self.log(f"-> Facebook abierto en dispositivo: {dev}")
-            else:
-                self.log(f"-> [{dev}] No se pudo abrir Facebook o no está instalada.")
-
-        self.execute_multithreaded(task, "Abrir Facebook")
-
-    def open_url_all(self):
-        url = self.entry_url.get().strip()
-        if not url:
-            messagebox.showwarning("Aviso", "La URL no puede estar vacía.")
-            return
-        self.log(f"Abriendo URL en paralelo: {url}")
-
-        def task(dev):
-            ok, detail = self.run_on_device(
-                dev,
-                ["shell", "am", "start", "-a", "android.intent.action.VIEW", "-d", url],
-            )
-            if ok:
-                self.log(f"-> URL abierta en dispositivo: {dev}")
-            else:
-                self.log(f"-> No se abrió la URL en [{dev}]: {detail}")
-
-        self.execute_multithreaded(task, "Abrir enlace")
-
-    def publish_text_all(self):
-        text = self.text_post.get("1.0", tk.END).strip()
-        if not text:
-            messagebox.showwarning("Aviso", "El texto de publicación está vacío.")
-            return
-        self.log("Enviando texto simultáneo a los dispositivos...")
-
-        def task(dev):
-            for line in text.split("\n"):
-                formatted_line = line.replace(" ", "%s").replace("&", "\\&")
-                ok, detail = self.run_on_device(
-                    dev, ["shell", "input", "text", formatted_line]
-                )
-                if not ok:
-                    self.log(f"-> Error enviando texto a [{dev}]: {detail}")
-                    return
-                self.run_on_device(dev, ["shell", "input", "keyevent", "66"])
-            self.log(f"-> Texto enviado al dispositivo: {dev}")
-
-        self.execute_multithreaded(task, "Enviar texto")
+    def stop_keyword_search(self): self.search_stop_event.set()
 
     def execute_vision_reaction(self, template_filename):
-        template_path = os.path.join("templates", template_filename)
-        if not os.path.exists(template_path):
-            messagebox.showerror(
-                "Falta Plantilla",
-                f"No se encontró el archivo de imagen '{template_filename}' en la"
-                " carpeta 'templates'. Por favor, guárdalo ahí antes de buscarlo por"
-                " forma.",
-            )
-            return
-
-        self.log(
-            f"Iniciando búsqueda visual de reacción usando molde:"
-            f" [{template_filename}]"
-        )
-
+        template_path = self.templates_dir / template_filename
+        if not template_path.exists(): return messagebox.showerror("Error", f"No se encontró {template_filename}")
         def task(dev):
             try:
-                result = subprocess.run(
-                    [self.adb, "-s", dev, "exec-out", "screencap", "-p"],
-                    stdout=subprocess.PIPE,
-                    creationflags=NO_WINDOW,
+                res = subprocess.run([self.adb, "-s", dev, "exec-out", "screencap", "-p"], stdout=subprocess.PIPE, creationflags=NO_WINDOW)
+                if not res.stdout: return
+                screen = cv2.imdecode(np.frombuffer(res.stdout, np.uint8), cv2.IMREAD_COLOR)
+                tmpl = cv2.imread(str(template_path), cv2.IMREAD_COLOR)
+                if tmpl is None: return
+                
+                gray_screen = cv2.cvtColor(screen, cv2.COLOR_BGR2GRAY)
+                gray_tmpl = cv2.cvtColor(tmpl, cv2.COLOR_BGR2GRAY)
+
+                best_score = 0.0
+                best_loc = None
+                best_shape = None
+
+                for f in np.linspace(0.7, 1.3, 13):
+                    p = cv2.resize(gray_tmpl, None, fx=f, fy=f)
+                    if p.shape[0] > gray_screen.shape[0] or p.shape[1] > gray_screen.shape[1]:
+                        continue
+                    match = cv2.matchTemplate(gray_screen, p, cv2.TM_CCOEFF_NORMED)
+                    _, score, _, loc = cv2.minMaxLoc(match)
+                    if score > best_score:
+                        best_score = score
+                        best_loc = loc
+                        best_shape = p.shape
+
+                if best_score >= 0.80 and best_loc is not None:
+                    th, tw = best_shape
+                    cx = best_loc[0] + tw // 2
+                    cy = best_loc[1] + th // 2
+                    self.run_on_device(dev, ["shell", "input", "tap", str(cx), str(cy)])
+                    self.log(f"[{dev}] Reacción enviada (Score: {best_score:.2f})")
+            except Exception as e: self.log(f"Error en visión [{dev}]: {e}")
+        self.execute_multithreaded(task, "Reacción visual")
+
+    def begin_interaction_process(self, devices, label):
+        self.interaction_stop_event.clear()
+        with self.device_tasks_lock:
+            self.interaction_running = True
+            self.interaction_devices = set(devices)
+        self.btn_start_selected.config(state="disabled")
+        self.btn_stop_interaction.config(state="normal")
+        self.interaction_status_var.set(label)
+
+    def finish_interaction_device(self, device):
+        with self.device_tasks_lock:
+            self.interaction_devices.discard(device)
+            finished = not self.interaction_devices
+            if finished:
+                self.interaction_running = False
+        if finished:
+            self.post_ui(self.finish_interaction_process)
+
+    def finish_interaction_process(self):
+        if self.combined_next_action == "comment" and not self.interaction_stop_event.is_set():
+            self.combined_next_action = None
+            self.interaction_status_var.set("Me gusta completado; iniciando Comentario...")
+            self.start_comment_only_interaction()
+            return
+        self.btn_start_selected.config(state="normal")
+        self.btn_stop_interaction.config(state="disabled")
+        status = "Detenido" if self.interaction_stop_event.is_set() else "Completado"
+        self.interaction_status_var.set(status)
+
+    def stop_interaction_process(self):
+        if not self.interaction_running:
+            return
+        self.combined_next_action = None
+        self.interaction_stop_event.set()
+        self.btn_stop_interaction.config(state="disabled")
+        self.interaction_status_var.set("Deteniendo...")
+        self.log("Interacciones: detención solicitada por el operador.")
+
+    def start_selected_interactions(self):
+        if self.interaction_running:
+            return messagebox.showwarning("Proceso activo", "Detén o espera a que termine la interacción actual.")
+        do_like = bool(self.int_do_like_var.get())
+        do_comment = bool(self.int_do_comment_var.get())
+        if not do_like and not do_comment:
+            return messagebox.showwarning("Aviso", "Marca Me gusta, Comentario o ambas acciones.")
+        if do_comment and not self.text_int_comment.get("1.0", tk.END).strip():
+            return messagebox.showwarning("Aviso", "Escribe el texto del comentario.")
+        self.combined_next_action = "comment" if do_like and do_comment else None
+        if do_like:
+            self.start_like_only_interaction()
+            if not self.interaction_running:
+                self.combined_next_action = None
+        else:
+            self.start_comment_only_interaction()
+
+    def start_like_only_interaction(self):
+        if self.interaction_running:
+            return messagebox.showwarning("Proceso activo", "Detén o espera a que termine la interacción actual.")
+        url = self.entry_int_url.get().strip()
+        do_airplane = self.int_airplane_var.get()
+        do_warmup = self.int_warmup_var.get()
+        calculated_click = bool(self.int_calculated_click_var.get())
+        reel_mode = bool(self.int_reel_mode_var.get())
+        target_devs = self.get_selected_devices()
+        if not target_devs: return messagebox.showwarning("Aviso", "Selecciona al menos un celular.")
+        if not self.is_facebook_url(url):
+            return messagebox.showwarning("Aviso", "Ingresa una URL válida de Facebook.")
+        try:
+            l_min, l_max = float(self.int_load_min.get()), float(self.int_load_max.get())
+            if l_min < 0 or l_max < l_min:
+                raise ValueError
+        except ValueError:
+            return messagebox.showwarning("Intervalo no válido", "Revisa el tiempo mínimo y máximo de carga.")
+        try:
+            calculated_scrolls = int(self.int_calculated_scrolls_var.get())
+            if not 0 <= calculated_scrolls <= 30:
+                raise ValueError
+        except ValueError:
+            return messagebox.showwarning("Desplazamientos no válidos", "Usa un valor entero de 0 a 30.")
+        target_devs, busy = self.claim_devices(target_devs, "Solo Me gusta")
+        if not target_devs:
+            return messagebox.showwarning("Equipos ocupados", "Los equipos seleccionados ya ejecutan otra acción.")
+        if busy:
+            messagebox.showinfo("Equipos ocupados", "Se omitieron equipos que ya ejecutan otra acción.")
+        self.begin_interaction_process(target_devs, "Me gusta en curso...")
+        for idx, dev in enumerate(target_devs):
+            delay = idx * 4.0
+            def task(d=dev, wait_sec=delay):
+                prev = self.device_tasks.get(d)
+                self.set_device_task(d, "Solo Like FB Lite")
+                try:
+                    if wait_sec > 0 and self.wait_or_cancel(wait_sec, self.interaction_stop_event): return
+                    if self.app_closing.is_set() or self.interaction_stop_event.is_set(): return
+                    if do_airplane and not self.toggle_airplane_mode(d, self.interaction_stop_event): return
+                    if do_warmup and not self.simular_navegacion_organica(d, 5.0, 15.0, self.interaction_stop_event): return
+                    ok, detail = self.run_on_device(d, ["shell", "am", "start", "-a", "android.intent.action.VIEW", "-d", url, "com.facebook.lite"])
+                    if not ok:
+                        self.log(f"[{d}] No se pudo abrir la publicación: {detail}")
+                        return
+                    if self.wait_or_cancel(random.uniform(l_min, l_max), self.interaction_stop_event): return
+                    size = self.get_device_screen_size(d)
+                    if not size: return
+                    w, h = size
+                    result = "not_found"
+                    if reel_mode:
+                        hierarchy = self.get_android_hierarchy(d)
+                        result = self.apply_reel_action(
+                            d, "like", hierarchy, size, self.interaction_stop_event
+                        )
+                    else:
+                        search_scrolls = calculated_scrolls if calculated_click else 2
+                        # Analiza primero la pantalla tal como abrió el enlace y vuelve
+                        # a analizar después de cada desplazamiento hasta encontrarlo.
+                        for attempt in range(search_scrolls + 1):
+                            hierarchy = self.get_android_hierarchy(d)
+                            result = self.apply_like_action(d, hierarchy, stop_event=self.interaction_stop_event)
+                            if result == "not_found" and calculated_click:
+                                result = self.apply_calculated_figure_action(d, "like", self.interaction_stop_event)
+                            if result != "not_found":
+                                break
+                            if attempt < search_scrolls:
+                                if calculated_click:
+                                    start_y, end_y, duration = int(h * 0.80), int(h * 0.32), "700"
+                                    self.log(
+                                        f"[{d}] Manita no localizada; desplazamiento largo {attempt + 1}/{search_scrolls}."
+                                    )
+                                else:
+                                    start_y, end_y, duration = int(h * 0.58), int(h * 0.46), "650"
+                                ok, detail = self.run_on_device(
+                                    d,
+                                    ["shell", "input", "swipe", str(w//2), str(start_y), str(w//2), str(end_y), duration],
+                                    timeout=15,
+                                )
+                                if not ok:
+                                    self.log(f"[{d}] No se pudo ajustar la publicación: {detail}")
+                                    break
+                                if self.wait_or_cancel(1.0, self.interaction_stop_event): return
+                    if result == "not_found" and not reel_mode:
+                        if self.tap_image_template(d, "like.png"):
+                            if self.wait_or_cancel(0.8, self.interaction_stop_event): return
+                            updated = self.get_android_hierarchy(d)
+                            state, _ = self.find_like_control(updated)
+                            if state == "already_liked":
+                                self.log(f"[{d}] Me gusta confirmado después del reconocimiento visual.")
+                            else:
+                                self.log(f"[{d}] Toque visual enviado; estado de Me gusta no confirmado.")
+                        else:
+                            self.log(f"[{d}] No se encontró un control seguro para Me gusta; no se tocó por coordenadas.")
+                    elif result == "not_found" and reel_mode:
+                        self.log(f"[{d}] No se encontró un control seguro para Me gusta en el Reel.")
+                    if self.wait_or_cancel(2.0, self.interaction_stop_event): return
+                    self.run_on_device(d, ["shell", "input", "keyevent", "4"])
+                except Exception as error:
+                    self.log(f"[{d}] Error en Solo Me gusta: {error}")
+                finally:
+                    self.release_device(d)
+                    self.finish_interaction_device(d)
+                    self.post_ui(lambda device=d, previous=prev: self.restore_device_task(device, "Solo Like FB Lite", previous))
+            threading.Thread(target=task, daemon=True).start()
+
+    def start_comment_only_interaction(self):
+        if self.interaction_running:
+            return messagebox.showwarning("Proceso activo", "Detén o espera a que termine la interacción actual.")
+        url = self.entry_int_url.get().strip()
+        do_airplane = self.int_airplane_var.get()
+        do_warmup = self.int_warmup_var.get()
+        calculated_click = bool(self.int_calculated_click_var.get())
+        reel_mode = bool(self.int_reel_mode_var.get())
+        raw_comment_text = self.text_int_comment.get("1.0", tk.END).strip()
+        target_devs = self.get_selected_devices()
+        if not target_devs: return messagebox.showwarning("Aviso", "Selecciona al menos un celular.")
+        if not self.is_facebook_url(url):
+            return messagebox.showwarning("Aviso", "Ingresa una URL válida de Facebook.")
+        if not raw_comment_text: return messagebox.showwarning("Aviso", "Escribe el texto del comentario.")
+        try:
+            l_min, l_max = float(self.int_load_min.get()), float(self.int_load_max.get())
+            if l_min < 0 or l_max < l_min:
+                raise ValueError
+        except ValueError:
+            return messagebox.showwarning("Intervalo no válido", "Revisa el tiempo mínimo y máximo de carga.")
+        try:
+            calculated_scrolls = int(self.int_calculated_scrolls_var.get())
+            if not 0 <= calculated_scrolls <= 30:
+                raise ValueError
+        except ValueError:
+            return messagebox.showwarning("Desplazamientos no válidos", "Usa un valor entero de 0 a 30.")
+        target_devs, busy = self.claim_devices(target_devs, "Solo comentario")
+        if not target_devs:
+            return messagebox.showwarning("Equipos ocupados", "Los equipos seleccionados ya ejecutan otra acción.")
+        if busy:
+            messagebox.showinfo("Equipos ocupados", "Se omitieron equipos que ya ejecutan otra acción.")
+        self.begin_interaction_process(target_devs, "Comentario en curso...")
+        for idx, dev in enumerate(target_devs):
+            unique_text = self.parse_spintax(raw_comment_text)
+            delay = idx * 4.0
+            def task(d=dev, wait_sec=delay, txt=unique_text):
+                prev = self.device_tasks.get(d)
+                self.set_device_task(d, "Solo Comentario FB Lite")
+                try:
+                    if wait_sec > 0 and self.wait_or_cancel(wait_sec, self.interaction_stop_event): return
+                    if self.app_closing.is_set() or self.interaction_stop_event.is_set(): return
+                    if do_airplane and not self.toggle_airplane_mode(d, self.interaction_stop_event): return
+                    if do_warmup and not self.simular_navegacion_organica(d, 5.0, 15.0, self.interaction_stop_event): return
+                    ok, detail = self.run_on_device(d, ["shell", "am", "start", "-a", "android.intent.action.VIEW", "-d", url, "com.facebook.lite"])
+                    if not ok:
+                        self.log(f"[{d}] No se pudo abrir la publicación: {detail}")
+                        return
+                    if self.wait_or_cancel(random.uniform(l_min, l_max), self.interaction_stop_event): return
+                    size = self.get_device_screen_size(d)
+                    if not size: return
+                    comment_point = None
+                    comment_action_opened = False
+                    if reel_mode:
+                        hierarchy = self.get_android_hierarchy(d)
+                        reel_result = self.apply_reel_action(
+                            d, "comment", hierarchy, size, self.interaction_stop_event
+                        )
+                        if reel_result != "sent":
+                            self.log(f"[{d}] No se pudo abrir Comentarios desde el control lateral del Reel.")
+                            return
+                        comment_action_opened = True
+                        if self.wait_or_cancel(1.4, self.interaction_stop_event): return
+                        search_scrolls = 0
+                    else:
+                        search_scrolls = calculated_scrolls if calculated_click else 2
+                    for attempt in range(search_scrolls + 1):
+                        hierarchy = self.get_android_hierarchy(d)
+                        comment_point = self.find_accessible_control(
+                            hierarchy,
+                            exact_labels=("escribe un comentario", "write a comment", "comenta como", "comment as"),
+                            prefix_labels=("escribe un comentario", "write a comment", "comenta como", "comentar como", "comment as", "add a comment"),
+                            screen_size=size,
+                            ignore_top_pct=0.20,
+                            allow_nonclickable=True,
+                        )
+                        if not comment_point:
+                            comment_point = self.find_bottom_editable_control(hierarchy, size)
+                        if comment_point:
+                            break
+                        if not reel_mode and calculated_click and not comment_action_opened:
+                            visual_result = self.apply_calculated_figure_action(
+                                d, "comment", self.interaction_stop_event
+                            )
+                            if visual_result == "sent":
+                                comment_action_opened = True
+                                if self.wait_or_cancel(1.4, self.interaction_stop_event): return
+                                hierarchy = self.get_android_hierarchy(d)
+                                comment_point = self.find_accessible_control(
+                                    hierarchy,
+                                    exact_labels=("escribe un comentario", "write a comment", "comenta como", "comment as"),
+                                    prefix_labels=("escribe un comentario", "write a comment", "comenta como", "comentar como", "comment as", "add a comment"),
+                                    screen_size=size,
+                                    ignore_top_pct=0.20,
+                                    allow_nonclickable=True,
+                                ) or self.find_bottom_editable_control(hierarchy, size)
+                                if comment_point:
+                                    break
+                        if attempt < search_scrolls:
+                            w, h = size
+                            ok, detail = self.run_on_device(
+                                d,
+                                ["shell", "input", "swipe", str(w//2), str(int(h*0.58)), str(w//2), str(int(h*0.46)), "650"],
+                                timeout=15,
+                            )
+                            if not ok:
+                                self.log(f"[{d}] No se pudo ajustar la publicación para buscar el comentario: {detail}")
+                                break
+                            if self.wait_or_cancel(1.0, self.interaction_stop_event): return
+                    if not comment_point:
+                        self.log(f"[{d}] No se encontró el campo exacto de comentario; no se tocó por coordenadas.")
+                        return
+                    ok, detail = self.run_on_device(d, ["shell", "input", "tap", str(comment_point[0]), str(comment_point[1])], timeout=15)
+                    if not ok:
+                        self.log(f"[{d}] No se pudo activar el campo de comentario: {detail}")
+                        return
+                    if self.wait_or_cancel(1.0, self.interaction_stop_event): return
+                    self.clear_focused_text(d, 500)
+                    if self.wait_or_cancel(0.4, self.interaction_stop_event): return
+                    if not self.inject_text_adb(d, txt): return
+                    if self.wait_or_cancel(1.0, self.interaction_stop_event): return
+                    text_verified = self.visible_text_contains(d, txt)
+                    if not text_verified and (calculated_click or reel_mode):
+                        ready_screen = self.capture_device_screen(d)
+                        text_verified = bool(self.locate_blue_send_arrow(ready_screen))
+                        if text_verified:
+                            self.log(
+                                f"[{d}] Facebook no expone el texto a accesibilidad; la flecha azul activa confirma que el editor contiene texto."
+                            )
+                    if not text_verified:
+                        self.clear_focused_text(d, len(txt))
+                        self.log(f"[{d}] No se confirmó texto en el editor; no se intentará publicar.")
+                        return
+                    hierarchy = self.get_android_hierarchy(d)
+                    publish_point = self.find_accessible_control(
+                        hierarchy,
+                        exact_labels=("publicar", "publicar comentario", "enviar comentario", "post", "send"),
+                        prefix_labels=("publicar comentario", "enviar comentario", "post comment", "send comment"),
+                        screen_size=size,
+                        allow_nonclickable=True,
+                    )
+                    if publish_point:
+                        ok, detail = self.run_on_device(d, ["shell", "input", "tap", str(publish_point[0]), str(publish_point[1])], timeout=15)
+                        if not ok:
+                            self.log(f"[{d}] No se pudo pulsar Publicar: {detail}")
+                            return
+                    elif (calculated_click or reel_mode) and self.tap_blue_send_arrow(
+                        d, attempts=3, delay=0.45, stop_event=self.interaction_stop_event
+                    ):
+                        self.log(f"[{d}] Envío solicitado mediante la flecha azul calculada.")
+                    else:
+                        self.log(f"[{d}] No se encontró el botón ni la flecha azul de envío; el comentario queda sin enviar.")
+                        return
+                    if self.wait_or_cancel(2.5, self.interaction_stop_event): return
+                    still_visible = self.visible_text_contains(d, txt)
+                    if not still_visible and (calculated_click or reel_mode):
+                        remaining_screen = self.capture_device_screen(d)
+                        still_visible = bool(self.locate_blue_send_arrow(remaining_screen))
+                    if still_visible:
+                        self.log(f"[{d}] Publicar fue pulsado, pero el envío del comentario no quedó confirmado.")
+                        return
+                    else:
+                        self.log(f"[{d}] Comentario enviado y confirmado por el cambio de pantalla.")
+                    self.run_on_device(d, ["shell", "input", "keyevent", "4"])
+                except Exception as error:
+                    self.log(f"[{d}] Error en Solo comentario: {error}")
+                finally:
+                    self.release_device(d)
+                    self.finish_interaction_device(d)
+                    self.post_ui(lambda device=d, previous=prev: self.restore_device_task(device, "Solo Comentario FB Lite", previous))
+            threading.Thread(target=task, daemon=True).start()
+
+    def start_human_warming(self):
+        target_devs = self.get_selected_devices()
+        if not target_devs: return messagebox.showwarning("Aviso", "Selecciona al menos un celular.")
+        try: duration_mins = float(self.hum_duration_var.get())
+        except ValueError: duration_mins = 30.0
+        self.human_stop_event.clear(); self.human_running = True
+        self.btn_start_human.config(state="disabled"); self.btn_stop_human.config(state="normal")
+        self.hum_status_var.set(f"Estado: Ejecutando calentamiento por {duration_mins:.0f} minutos...")
+        threading.Thread(target=self.human_warming_worker, args=(target_devs, duration_mins), daemon=True).start()
+
+    def human_warming_worker(self, devices, duration_mins):
+        end_time = time.time() + (duration_mins * 60)
+        while time.time() < end_time and not self.human_stop_event.is_set() and not self.app_closing.is_set():
+            for dev in devices:
+                if self.human_stop_event.is_set(): break
+                self.set_device_task(dev, "Modo Humano (Calentamiento)")
+                size = self.screen_size_cache.get(dev, (1080, 1920))
+                w, h = size
+                self.run_on_device(dev, ["shell", "input", "swipe", str(w//2), str(int(h*0.75)), str(w//2), str(int(h*0.30)), str(random.randint(350, 650))])
+                time.sleep(random.uniform(3.0, 9.0))
+        for dev in devices: self.restore_device_task(dev, "Modo Humano (Calentamiento)", None)
+        self.post_ui(lambda: (self.btn_start_human.config(state="normal"), self.btn_stop_human.config(state="disabled"), self.hum_status_var.set("Estado: Calentamiento finalizado."), setattr(self, 'human_running', False)))
+
+    def stop_human_warming(self):
+        self.human_stop_event.set()
+        self.hum_status_var.set("Estado: Deteniendo calentamiento...")
+        self.btn_start_human.config(state="normal"); self.btn_stop_human.config(state="disabled")
+        self.human_running = False
+
+    def start_mass_report(self):
+        url = self.entry_rep_url.get().strip()
+        target_devs = self.get_selected_devices()
+        if not target_devs or not url: return messagebox.showwarning("Aviso", "Selecciona dispositivos e ingresa URL.")
+        reason = self.rep_reason_var.get()
+        do_airplane = self.rep_airplane_var.get()
+        self.report_stop_event.clear(); self.report_running = True
+        self.btn_start_report.config(state="disabled"); self.btn_stop_report.config(state="normal")
+        self.rep_status_var.set("Estado: Ejecutando reporte masivo...")
+        threading.Thread(target=self.mass_report_worker, args=(target_devs, url, reason, do_airplane), daemon=True).start()
+
+    def mass_report_worker(self, devices, url, reason, do_airplane):
+        for idx, dev in enumerate(devices):
+            if self.report_stop_event.is_set() or self.app_closing.is_set(): break
+            prev = self.device_tasks.get(dev)
+            self.set_device_task(dev, "Reportando en FB Lite")
+            try:
+                if do_airplane: self.toggle_airplane_mode(dev)
+                self.run_on_device(dev, ["shell", "am", "start", "-a", "android.intent.action.VIEW", "-d", url, "com.facebook.lite"])
+                time.sleep(7.0)
+                size = self.screen_size_cache.get(dev, (1080, 1920))
+                w, h = size
+                if not self.find_node_and_tap(dev, ["opciones", "more", "options", "..."], size):
+                    self.run_on_device(dev, ["shell", "input", "tap", str(int(w*0.92)), str(int(h*0.12))])
+                time.sleep(2.0)
+                if not self.find_node_and_tap(dev, ["reportar", "report"], size):
+                    self.run_on_device(dev, ["shell", "input", "tap", str(int(w*0.5)), str(int(h*0.45))])
+                time.sleep(2.0)
+                keyword_motivo = "spam" if reason == "spam" else ("falsa" if reason == "falsa" else "cuenta")
+                self.find_node_and_tap(dev, [keyword_motivo, "fraude", "falso"], size)
+                time.sleep(2.0)
+                if not self.find_node_and_tap(dev, ["enviar", "listo", "done", "submit"], size):
+                    self.run_on_device(dev, ["shell", "input", "tap", str(int(w*0.85)), str(int(h*0.92))])
+                time.sleep(2.0)
+                self.run_on_device(dev, ["shell", "input", "keyevent", "4"])
+            finally:
+                self.restore_device_task(dev, "Reportando en FB Lite", prev)
+        self.post_ui(lambda: (self.btn_start_report.config(state="normal"), self.btn_stop_report.config(state="disabled"), self.rep_status_var.set("Estado: Reportes masivos finalizados."), setattr(self, 'report_running', False)))
+
+    def stop_mass_report(self):
+        self.report_stop_event.set()
+        self.rep_status_var.set("Estado: Deteniendo reportes...")
+        self.btn_start_report.config(state="normal"); self.btn_stop_report.config(state="disabled")
+        self.report_running = False
+
+    def parse_spintax(self, text):
+        while True:
+            match = re.search(r'\{([^{}]*)\}', text)
+            if not match: break
+            options = match.group(1).split('|')
+            text = text[:match.start()] + random.choice(options) + text[match.end():]
+        return text
+
+    def inject_text_adb(self, device, text):
+        """Escribe texto y falla de forma explícita si Unicode no es compatible."""
+        if not text:
+            return True
+
+        needs_unicode = any(ord(character) > 127 for character in text)
+        if needs_unicode:
+            ok, ime_list = self.run_on_device(device, ["shell", "ime", "list", "-s"], timeout=15)
+            if not ok:
+                self.log(f"[{device}] No se pudo consultar el teclado Android: {ime_list}")
+                return False
+            adb_ime = next(
+                (line.strip() for line in ime_list.splitlines() if "com.android.adbkeyboard" in line.casefold()),
+                None,
+            )
+            if not adb_ime:
+                self.log(
+                    f"[{device}] El comentario contiene Unicode, pero ADB Keyboard no está instalado; no se publicará texto incompleto."
                 )
-                screen_bytes = result.stdout
-                if not screen_bytes:
-                    self.log(f"[{dev}] Error: No se pudo capturar la pantalla.")
-                    return
-
-                nparr = np.frombuffer(screen_bytes, np.uint8)
-                screen_img = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
-
-                template_img = cv2.imread(template_path, cv2.IMREAD_COLOR)
-                if template_img is None:
-                    self.log(f"Error al leer la plantilla {template_filename}")
-                    return
-
-                h, w = template_img.shape[:2]
-
-                match_result = cv2.matchTemplate(
-                    screen_img, template_img, cv2.TM_CCOEFF_NORMED
+                return False
+            ok, current_ime = self.run_on_device(
+                device, ["shell", "settings", "get", "secure", "default_input_method"], timeout=15
+            )
+            if not ok:
+                self.log(f"[{device}] No se pudo leer el teclado actual: {current_ime}")
+                return False
+            try:
+                ok, detail = self.run_on_device(device, ["shell", "ime", "set", adb_ime], timeout=15)
+                if not ok:
+                    self.log(f"[{device}] No se pudo activar ADB Keyboard: {detail}")
+                    return False
+                payload = base64.b64encode(text.encode("utf-8")).decode("ascii")
+                ok, detail = self.run_on_device(
+                    device,
+                    ["shell", "am", "broadcast", "-a", "ADB_INPUT_B64", "--es", "msg", payload],
+                    timeout=20,
                 )
-                min_val, max_val, min_loc, max_loc = cv2.minMaxLoc(match_result)
+                if not ok:
+                    self.log(f"[{device}] No se pudo inyectar texto Unicode: {detail}")
+                    return False
+            finally:
+                previous = current_ime.strip()
+                if previous and previous != "null":
+                    self.run_on_device(device, ["shell", "ime", "set", previous], timeout=15)
+            return True
 
-                threshold = 0.80
-                if max_val >= threshold:
-                    center_x = max_loc[0] + w // 2
-                    center_y = max_loc[1] + h // 2
+        lines = text.splitlines() or [""]
+        for index, line in enumerate(lines):
+            # ADB interpreta %s como espacio. Los metacaracteres se escapan para
+            # que el texto llegue directamente al campo enfocado, sin depender
+            # de que Android incluya la utilidad externa base64.
+            escaped = line.replace("\\", "\\\\").replace("%", "\\%").replace(" ", "%s")
+            for character in ('"', "'", "&", "<", ">", ";", "|", "(", ")", "$", "`", "!", "*", "?", "[", "]", "{", "}"):
+                escaped = escaped.replace(character, "\\" + character)
+            ok, detail = self.run_on_device(
+                device, ["shell", "input", "text", escaped], timeout=20
+            )
+            if not ok:
+                self.log(f"[{device}] No se pudo escribir el comentario: {detail}")
+                return False
+            if index < len(lines) - 1:
+                ok, detail = self.run_on_device(device, ["shell", "input", "keyevent", "66"], timeout=15)
+                if not ok:
+                    self.log(f"[{device}] No se pudo insertar un salto de línea: {detail}")
+                    return False
+        return True
 
-                    self.run_on_device(
-                        dev, ["shell", "input", "tap", str(center_x), str(center_y)]
-                    )
-                    self.log(
-                        f"[{dev}] ¡Reacción encontrada por forma! Coordenadas"
-                        f" aplicadas: X={center_x}, Y={center_y} (Confianza:"
-                        f" {max_val:.2f})"
-                    )
-                else:
-                    self.log(
-                        f"[{dev}] No se detectó la forma de la reacción en pantalla"
-                        f" (Coincidencia máxima: {max_val:.2f})"
-                    )
+    def clear_focused_text(self, device, character_count):
+        """Limpia un borrador parcial sin tocar ningún botón de publicación."""
+        count = max(1, min(int(character_count) + 5, 500))
+        self.run_on_device(device, ["shell", "input", "keyevent", "123"], timeout=15)
+        ok, _ = self.run_on_device(
+            device, ["shell", "input", "keyevent"] + (["67"] * count), timeout=20
+        )
+        return ok
 
-            except Exception as e:
-                self.log(f"Error en procesamiento visual para [{dev}]: {e}")
+    def visible_text_contains(self, device, expected_text):
+        hierarchy = self.get_android_hierarchy(device)
+        if not hierarchy:
+            return False
+        visible = self.normalize_search_text(self.extract_visible_text(hierarchy))
+        expected = self.normalize_search_text(expected_text).strip()
+        return bool(expected) and expected in visible
 
-        self.execute_multithreaded(task, f"Reacción visual: {template_filename}")
+    def capture_device_screen(self, device):
+        if not OPENCV_AVAILABLE:
+            return None
+        try:
+            result = subprocess.run(
+                [self.adb, "-s", device, "exec-out", "screencap", "-p"],
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                timeout=30,
+                creationflags=NO_WINDOW,
+            )
+            if result.returncode != 0 or not result.stdout:
+                detail = result.stderr.decode(errors="replace").strip() if result.stderr else "captura vacía"
+                self.log(f"[{device}] No se pudo capturar la pantalla: {detail}")
+                return None
+            return cv2.imdecode(np.frombuffer(result.stdout, np.uint8), cv2.IMREAD_COLOR)
+        except Exception as error:
+            self.log(f"[{device}] No se pudo capturar la pantalla: {error}")
+            return None
 
+    def locate_blue_send_arrow(self, screen):
+        """Localiza un componente azul de envío en el sector derecho del editor."""
+        if not OPENCV_AVAILABLE or screen is None:
+            return None
+        height, width = screen.shape[:2]
+        hsv = cv2.cvtColor(screen, cv2.COLOR_BGR2HSV)
+        blue = cv2.inRange(hsv, np.array([92, 85, 80]), np.array([132, 255, 255]))
+        kernel = np.ones((3, 3), np.uint8)
+        blue = cv2.morphologyEx(blue, cv2.MORPH_CLOSE, kernel, iterations=2)
+        contours, _ = cv2.findContours(blue, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+        screen_area = float(width * height)
+        candidates = []
+        for contour in contours:
+            area = float(cv2.contourArea(contour))
+            x, y, box_width, box_height = cv2.boundingRect(contour)
+            center = (x + box_width // 2, y + box_height // 2)
+            # La flecha real está en el extremo derecho del editor. Este filtro
+            # excluye insignias azules de autores y reacciones dentro del hilo.
+            if center[0] < width * 0.80:
+                continue
+            if not height * 0.18 <= center[1] <= height * 0.98:
+                continue
+            if not screen_area * 0.00018 <= area <= screen_area * 0.0035:
+                continue
+            if box_width < width * 0.018 or box_height < height * 0.012:
+                continue
+            if box_width > width * 0.12 or box_height > height * 0.10:
+                continue
+            aspect = box_width / max(1.0, float(box_height))
+            if not 0.45 <= aspect <= 2.60:
+                continue
+            fill = area / max(1.0, float(box_width * box_height))
+            if fill < 0.18:
+                continue
+            score = (center[0] / width) * 2.0 + fill + min(area / (screen_area * 0.01), 1.0)
+            candidates.append((score, center, (x, y, box_width, box_height), fill))
+        if not candidates:
+            return None
+        candidates.sort(key=lambda item: item[0], reverse=True)
+        score, point, bounds, fill = candidates[0]
+        return {"point": point, "bounds": bounds, "fill": fill, "score": score}
+
+    def tap_blue_send_arrow(self, device, attempts=1, delay=0.45, stop_event=None):
+        attempts = max(1, int(attempts))
+        for attempt in range(attempts):
+            screen = self.capture_device_screen(device)
+            match = self.locate_blue_send_arrow(screen)
+            if match:
+                x, y = match["point"]
+                ok, detail = self.run_on_device(
+                    device, ["shell", "input", "tap", str(x), str(y)], timeout=15
+                )
+                if not ok:
+                    self.log(f"[{device}] Se encontró la flecha azul, pero el toque falló: {detail}")
+                    return False
+                self.log(f"[{device}] Flecha azul de envío pulsada en ({x}, {y}).")
+                return True
+            if attempt + 1 < attempts and self.wait_or_cancel(delay, stop_event):
+                return False
+        return False
+
+    def locate_action_figure(self, screen, template_name, x_range, threshold=0.46):
+        """Calcula el centro de una figura por bordes y escala, sin coordenada fija."""
+        if not OPENCV_AVAILABLE or screen is None:
+            return None
+        template_path = self.templates_dir / template_name
+        template = cv2.imread(str(template_path), cv2.IMREAD_COLOR)
+        if template is None:
+            return None
+        height, width = screen.shape[:2]
+        x1 = max(0, int(width * x_range[0]))
+        x2 = min(width, int(width * x_range[1]))
+        y1 = max(0, int(height * 0.14))
+        y2 = min(height, int(height * 0.94))
+        roi = screen[y1:y2, x1:x2]
+        if roi.size == 0:
+            return None
+        roi_edges = cv2.Canny(cv2.cvtColor(roi, cv2.COLOR_BGR2GRAY), 55, 145)
+        template_gray = cv2.cvtColor(template, cv2.COLOR_BGR2GRAY)
+        reference_scale = width / 720.0
+        best = None
+        for factor in np.linspace(0.65, 1.45, 17):
+            scale = reference_scale * factor
+            resized = cv2.resize(template_gray, None, fx=scale, fy=scale, interpolation=cv2.INTER_AREA)
+            if min(resized.shape[:2]) < 18:
+                continue
+            if resized.shape[0] > roi_edges.shape[0] or resized.shape[1] > roi_edges.shape[1]:
+                continue
+            edges = cv2.Canny(resized, 55, 145)
+            match = cv2.matchTemplate(roi_edges, edges, cv2.TM_CCOEFF_NORMED)
+            _, score, _, location = cv2.minMaxLoc(match)
+            if best is None or score > best[0]:
+                best = (float(score), location, resized.shape)
+        if best is None or best[0] < threshold:
+            return None
+        score, location, shape = best
+        point = (
+            x1 + location[0] + shape[1] // 2,
+            y1 + location[1] + shape[0] // 2,
+        )
+        radius = max(18, min(shape[:2]) // 2)
+        px1, px2 = max(0, point[0] - radius), min(width, point[0] + radius)
+        py1, py2 = max(0, point[1] - radius), min(height, point[1] + radius)
+        patch = screen[py1:py2, px1:px2]
+        blue_ratio = 0.0
+        if patch.size:
+            hsv = cv2.cvtColor(patch, cv2.COLOR_BGR2HSV)
+            blue = cv2.inRange(hsv, np.array([90, 65, 55]), np.array([135, 255, 255]))
+            blue_ratio = float(np.count_nonzero(blue)) / float(blue.size)
+        return {"point": point, "score": score, "active": blue_ratio >= 0.035}
+
+    def apply_calculated_figure_action(self, device, action, stop_event=None):
+        settings = {
+            "like": ("like_outline.png", (0.00, 0.38)),
+            "comment": ("comment_outline.png", (0.25, 0.68)),
+        }
+        template_name, x_range = settings[action]
+        screen = self.capture_device_screen(device)
+        match = self.locate_action_figure(screen, template_name, x_range)
+        if not match:
+            return "not_found"
+        if action == "like" and match["active"]:
+            self.log(f"[{device}] La manita calculada ya aparece activa; no se tocó.")
+            return "already_liked"
+        x, y = match["point"]
+        ok, detail = self.run_on_device(
+            device, ["shell", "input", "tap", str(x), str(y)], timeout=15
+        )
+        if not ok:
+            self.log(f"[{device}] Se localizó la figura, pero el toque falló: {detail}")
+            return "error"
+        self.log(
+            f"[{device}] Clic calculado en {action}: ({x}, {y}), coincidencia {match['score']:.2f}."
+        )
+        if action == "comment":
+            return "sent"
+        if self.wait_or_cancel(0.9, stop_event):
+            return "cancelled"
+        updated = self.capture_device_screen(device)
+        verification = self.locate_action_figure(updated, template_name, x_range)
+        if verification and verification["active"]:
+            self.log(f"[{device}] Me gusta confirmado visualmente.")
+            return "confirmed"
+        self.log(f"[{device}] Clic calculado enviado; Me gusta no confirmado visualmente.")
+        return "sent_unconfirmed"
+
+    def toggle_airplane_mode(self, device, stop_event=None):
+        self.run_on_device(device, ["shell", "settings", "put", "global", "airplane_mode_on", "1"])
+        self.run_on_device(device, ["shell", "am", "broadcast", "-a", "android.intent.action.AIRPLANE_MODE", "--ez", "state", "true"])
+        cancelled = self.wait_or_cancel(5.0, stop_event)
+        self.run_on_device(device, ["shell", "settings", "put", "global", "airplane_mode_on", "0"])
+        self.run_on_device(device, ["shell", "am", "broadcast", "-a", "android.intent.action.AIRPLANE_MODE", "--ez", "state", "false"])
+        if cancelled:
+            return False
+        if self.wait_or_cancel(6.0, stop_event):
+            return False
+        return True
+
+    def tap_image_template(self, device, template_name, threshold=0.75):
+        if not OPENCV_AVAILABLE: return False
+        template_path = self.templates_dir / template_name
+        if not template_path.exists(): return False
+        try:
+            res = subprocess.run(
+                [self.adb, "-s", device, "exec-out", "screencap", "-p"],
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                timeout=30,
+                creationflags=NO_WINDOW,
+            )
+            if res.returncode != 0 or not res.stdout:
+                detail = res.stderr.decode(errors="replace").strip() if res.stderr else "captura vacía"
+                self.log(f"[{device}] No se pudo capturar pantalla para {template_name}: {detail}")
+                return False
+            screen = cv2.imdecode(np.frombuffer(res.stdout, np.uint8), cv2.IMREAD_COLOR)
+            tmpl = cv2.imread(str(template_path), cv2.IMREAD_COLOR)
+            if screen is None or tmpl is None: return False
+            gray_screen = cv2.cvtColor(screen, cv2.COLOR_BGR2GRAY)
+            gray_tmpl = cv2.cvtColor(tmpl, cv2.COLOR_BGR2GRAY)
+            best_score = 0.0; best_loc = None; best_shape = None
+            for f in np.linspace(0.7, 1.3, 13):
+                p = cv2.resize(gray_tmpl, None, fx=f, fy=f)
+                if p.shape[0] > gray_screen.shape[0] or p.shape[1] > gray_screen.shape[1]: continue
+                match = cv2.matchTemplate(gray_screen, p, cv2.TM_CCOEFF_NORMED)
+                _, score, _, loc = cv2.minMaxLoc(match)
+                if score > best_score: best_score = score; best_loc = loc; best_shape = p.shape
+            if best_score >= threshold and best_loc is not None:
+                cx = best_loc[0] + best_shape[1] // 2
+                cy = best_loc[1] + best_shape[0] // 2
+                ok, detail = self.run_on_device(device, ["shell", "input", "tap", str(cx), str(cy)], timeout=15)
+                if not ok:
+                    self.log(f"[{device}] Coincidencia visual encontrada, pero el toque falló: {detail}")
+                    return False
+                self.log(f"[{device}] Coincidencia visual {template_name}: {best_score:.2f}")
+                return True
+        except Exception as error:
+            self.log(f"[{device}] Error en reconocimiento visual {template_name}: {error}")
+        return False
+
+    def find_node_and_tap(self, device, keywords, size, ignore_top_pct=0.10):
+        try:
+            hierarchy = self.get_android_hierarchy(device)
+            if not hierarchy: return False
+            for node in hierarchy.iter("node"):
+                text = node.attrib.get("text", "").strip().lower()
+                desc = node.attrib.get("content-desc", "").strip().lower()
+                for kw in keywords:
+                    if kw.lower() in text or kw.lower() in desc:
+                        bounds_str = node.attrib.get("bounds", "")
+                        match = re.match(r'\[(\d+),(\d+)\]\[(\d+),(\d+)\]', bounds_str)
+                        if match:
+                            x1, y1, x2, y2 = map(int, match.groups())
+                            cy = (y1 + y2) // 2
+                            cx = (x1 + x2) // 2
+                            if cy > size[1] * ignore_top_pct: 
+                                self.run_on_device(device, ["shell", "input", "tap", str(cx), str(cy)])
+                                return True
+        except Exception: pass
+        return False
 
 if __name__ == "__main__":
-    if not acquire_single_instance():
-        notice = tk.Tk()
-        notice.withdraw()
-        messagebox.showinfo(
-            "Panel ya abierto",
-            "Ya existe una instancia del Panel de Celulares en ejecución.",
-            parent=notice,
-        )
-        notice.destroy()
-        raise SystemExit(0)
     try:
+        if not acquire_single_instance(): sys.exit(0)
         root = tk.Tk()
         app = ProfessionalPhoneController(root)
         root.mainloop()
+    except Exception as e:
+        with open("registro_errores.txt", "a", encoding="utf-8") as f:
+            f.write(f"--- Error de Inicio ---\n{traceback.format_exc()}\n")
     finally:
         release_single_instance()

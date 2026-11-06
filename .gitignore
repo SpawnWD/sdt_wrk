@@ -8,6 +8,11 @@ bitacora_operativa.db
 bitacora_operativa.db-wal
 bitacora_operativa.db-shm
 dispositivos.json
+registros_busqueda/
 
 # Herramientas de terceros descargadas; se reinstalan o restauran por separado.
 herramientas/
+
+# Copias y diagnósticos locales
+_rollback/
+diagnostico.txt
