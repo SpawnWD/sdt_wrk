@@ -15,8 +15,10 @@ USO GENERAL
 - Los dispositivos aparecen en una tabla con su información y estado actual.
 - Usa "Asignar nombre" para guardar un identificador (ej. nombre del responsable) que se recordará por número de serie.
 - Selecciona uno o varios equipos de la tabla para enviarles comandos.
-- "Ver y controlar": Abre cada celular en su propia ventana usando scrcpy. Las ventanas se acomodan automáticamente en cuadrícula.
-- "Cerrar pantallas": Cierra las ventanas scrcpy de los equipos seleccionados.
+- "Ver en Pantalla": Abre cada celular en su propia ventana usando scrcpy 5.0, sin consolas CMD. Las pantallas se acomodan automáticamente según el tamaño del monitor y debajo de cada una se abre un log individual con alias, serie, tarea actual y mensajes del dispositivo. Después de abrir scrcpy, el panel lee el borde real de la ventana y alinea el log con el mismo margen izquierdo y exactamente el mismo ancho exterior.
+- "Ver todos": Selecciona todos los celulares conectados y organiza sus pantallas con sus logs individuales.
+- "Cerrar pantallas": Cierra las pantallas y logs de los equipos seleccionados. "Cerrar todas" termina todos los monitores abiertos.
+- Si scrcpy no puede iniciar, su salida se captura y aparece en el log individual y en la consola general del panel.
 - "Abrir Facebook": Inicia la aplicación de Facebook en los seleccionados.
 - "Abrir Link / URL": Abre el enlace especificado directamente en la app correspondiente de los celulares seleccionados.
 
@@ -46,6 +48,8 @@ Esta función permite revisar el contenido visible en pantalla sin interactuar a
 16. Después de enviar, Búsqueda localiza el texto esperado en toda la sección visible de comentarios situada por encima de `Escribe un comentario` o `Comenta como`. Cuando aparece `Más relevantes`, `Más recientes` o `Todos los comentarios`, esa línea marca el inicio real de la zona aunque esté en la parte superior de la pantalla.
 17. La confirmación combina varias líneas, admite diferencias OCR pequeñas y también acepta el aviso `Se publicó tu comentario`; evita confundir el resultado con el cuerpo principal de la publicación.
 18. Se realizan hasta cinco comprobaciones y una última validación tardía antes de autorizar el único reintento. Si tampoco aparece después del reintento, el panel sale de la publicación y continúa el scroll sin detener toda la búsqueda.
+19. Al abrir una coincidencia, Búsqueda obtiene el enlace usando exclusivamente `Más opciones` y `Copiar enlace`. Para leer el portapapeles del teléfono lo pega temporalmente en la búsqueda de Ajustes, regresa a Facebook y muestra `Enlace:` debajo de la coincidencia. No instala aplicaciones ni publica el contenido pegado.
+20. Los enlaces válidos se guardan en `registros_busqueda/enlaces_AAAA-MM-DD.csv` con dispositivo, palabras, fecha de la publicación y vista previa. Un mismo enlace no se duplica dentro del archivo del día. Si Facebook cambia los rótulos o no confirma la copia, el panel muestra `Enlace: no disponible` y continúa sin tocar otra opción.
 
 ACCIONES SOBRE UNA PUBLICACIÓN
 - Marca `Me gusta`, `Comentario` o ambas casillas y pulsa `Ejecutar acciones seleccionadas`. Cuando ambas están activas, el panel completa primero Me gusta y después Comentario usando la misma URL y los mismos teléfonos seleccionados.

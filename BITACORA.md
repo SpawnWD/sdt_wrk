@@ -21,6 +21,52 @@ Ninguno.
 
 ## Cambios completados
 
+### CHG-20261106-0614 — Captura y registro del enlace de cada coincidencia
+
+- Fecha y hora de inicio: 2026-11-06 06:14:42 (America/Mexico_City)
+- Estado: Completado localmente el 2026-11-06 09:36:24 (America/Mexico_City)
+- Tipo: Mejora funcional solicitada
+- Objetivo: Cuando Búsqueda abra una publicación coincidente, obtener su enlace, mostrarlo junto a la coincidencia y guardarlo en el CSV diario sin duplicados.
+- Implementación:
+  - La vista abierta se valida antes de tocar controles de la publicación.
+  - Se usan exclusivamente los rótulos exactos `Más opciones` y `Copiar enlace`; si no aparecen, se informa `Enlace: no disponible` y la búsqueda continúa.
+  - El portapapeles del teléfono se pega temporalmente en la búsqueda de Ajustes para leer el URL sin instalar aplicaciones ni publicar el contenido.
+  - El panel regresa a la misma publicación, cierra los menús y continúa con las acciones configuradas.
+  - El resultado de Búsqueda muestra `Enlace: <URL> · guardado en registro diario`.
+  - Cada URL válida se guarda sin duplicados en `registros_busqueda/enlaces_AAAA-MM-DD.csv` con fecha, dispositivo, palabras, fecha de la publicación y vista previa.
+- Pruebas realizadas:
+  - Compilación de Python y `git diff --check`: correctos.
+  - Extracción aislada desde Ajustes: recuperó `https://www.facebook.com/share/p/1FTwJvGAJi/`.
+  - Validación de dominio: rechazó un URL ajeno a Facebook.
+  - Registro CSV: creación correcta y segundo intento del mismo URL sin duplicarlo.
+  - Prueba completa en el celular `W555NEU0100057516`: abrió `Más opciones`, copió el enlace, lo recuperó desde Ajustes y obtuvo `https://www.facebook.com/share/p/1DrrfC4PBi/`.
+  - Verificación visual final: regresó a la publicación correcta con ambos menús cerrados; después se restauró el feed.
+- Referencia de rollback: `_rollback\CHG-20261106-0614`.
+- Rama Git: `integracion`.
+- Hash de `panel.py`: `52C085A0970AC4D3449D1C4969E770E7DEEB3B77A1EDFB332F9556661B7B0EE7`.
+- Hash de `LEEME.txt`: `1736D8750646B1CA8407C44CA1488F7A704408751318CD57D0AF0BEED624B7E9`.
+
+### CHG-20261106-0531 — Monitor multi-celular con logs individuales
+
+- Fecha y hora de inicio: 2026-11-06 05:31:56 (America/Mexico_City)
+- Estado: Completado localmente el 2026-11-06 09:36:24 (America/Mexico_City)
+- Tipo: Mejora funcional solicitada
+- Implementación:
+  - `Ver en Pantalla` usa las opciones compatibles con scrcpy 5.0 y ya no crea una consola CMD por teléfono.
+  - Las pantallas se distribuyen según el tamaño del monitor y cada teléfono tiene un log individual debajo.
+  - El borde real de la ventana de scrcpy se lee en Windows para alinear el log con el mismo margen izquierdo y exactamente el mismo ancho exterior.
+  - Se añadieron `Ver todos`, `Cerrar pantallas` y `Cerrar todas`, además de cierre y seguimiento independiente por dispositivo.
+  - La salida de scrcpy y los mensajes identificados por serie se muestran en el log del teléfono correspondiente.
+- Pruebas realizadas:
+  - Cálculo de distribución verificado para 1, 2, 4, 6 y 8 equipos.
+  - Prueba real con un celular: scrcpy abrió sin consola CMD y el log individual recibió la salida del monitor.
+  - Compilación de Python y `git diff --check`: correctos.
+- Prueba pendiente no bloqueante: validar visualmente la distribución simultánea cuando estén conectados varios celulares físicos.
+- Referencia de rollback: `_rollback\CHG-20261106-0531`.
+- Rama Git: `integracion`.
+- Hash de `panel.py`: `52C085A0970AC4D3449D1C4969E770E7DEEB3B77A1EDFB332F9556661B7B0EE7`.
+- Hash de `LEEME.txt`: `1736D8750646B1CA8407C44CA1488F7A704408751318CD57D0AF0BEED624B7E9`.
+
 ### CHG-20261106-0504 — Evitar aperturas accidentales durante el scroll
 
 - Fecha y hora de inicio: 2026-11-06 05:04:35 (America/Mexico_City)

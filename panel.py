@@ -1,4 +1,5 @@
 import ctypes
+from ctypes import wintypes
 import csv
 from difflib import SequenceMatcher
 import json
@@ -22,7 +23,6 @@ from urllib.parse import urlparse
 import base64
 
 NO_WINDOW = getattr(subprocess, "CREATE_NO_WINDOW", 0) if os.name == "nt" else 0
-CREATE_NEW_CONSOLE = getattr(subprocess, "CREATE_NEW_CONSOLE", 16) if os.name == "nt" else 0
 INSTANCE_MUTEX = None
 BASE_DIR = Path(__file__).resolve().parent
 
@@ -98,9 +98,13 @@ class ProfessionalPhoneController:
         self.device_details = {}
         self.device_tasks = {}
         self.device_tasks_lock = threading.Lock()
+        self.search_record_lock = threading.Lock()
         self.busy_devices = set()
         self.uiautomator_lock = threading.Lock()
         self.scrcpy_processes = {}
+        self.device_log_windows = {}
+        self.device_log_texts = {}
+        self.device_log_status_vars = {}
         self.search_devices = []
         self.pending_search_match = None
         self.ocr_warning_shown = False
@@ -206,7 +210,9 @@ class ProfessionalPhoneController:
         ttk.Button(toolbar, text="Ninguno", command=self.clear_device_selection).pack(side="left", padx=(7, 0))
         ttk.Button(toolbar, text="Asignar nombre", command=self.rename_selected_device).pack(side="left", padx=(7, 0))
         ttk.Button(toolbar, text="Ver en Pantalla", command=self.open_selected_screens, style="Primary.TButton").pack(side="left", padx=(18, 0))
+        ttk.Button(toolbar, text="Ver todos", command=self.open_all_screens).pack(side="left", padx=(7, 0))
         ttk.Button(toolbar, text="Cerrar pantallas", command=self.close_selected_screens).pack(side="left", padx=(7, 0))
+        ttk.Button(toolbar, text="Cerrar todas", command=self.close_all_screens).pack(side="left", padx=(7, 0))
 
         self.lbl_devices = ttk.Label(toolbar, text="Dispositivos detectados: 0", font=("Segoe UI", 9, "bold"))
         self.lbl_devices.pack(side="right", padx=5)
@@ -627,6 +633,7 @@ class ProfessionalPhoneController:
                 if kind == "log":
                     self.console.insert(tk.END, payload + "\n")
                     self.console.see(tk.END)
+                    self.route_device_log(payload)
                 elif kind == "call":
                     payload()
         except queue.Empty: pass
@@ -644,6 +651,9 @@ class ProfessionalPhoneController:
         self.report_stop_event.set()
         for p in list(self.scrcpy_processes.values()):
             try: p.terminate()
+            except: pass
+        for window in list(self.device_log_windows.values()):
+            try: window.destroy()
             except: pass
         self.root.destroy()
 
@@ -686,7 +696,11 @@ class ProfessionalPhoneController:
     def update_device_row(self, serial):
         if not hasattr(self, "device_table") or not self.device_table.exists(serial): return
         det = self.device_details.get(serial, {})
-        self.device_table.item(serial, values=(self.device_aliases.get(serial, ""), det.get("model", ""), serial, det.get("android", ""), det.get("state", ""), self.device_tasks.get(serial, "Listo")))
+        task = self.device_tasks.get(serial, "Listo")
+        self.device_table.item(serial, values=(self.device_aliases.get(serial, ""), det.get("model", ""), serial, det.get("android", ""), det.get("state", ""), task))
+        status_var = self.device_log_status_vars.get(serial)
+        if status_var is not None:
+            status_var.set(f"Tarea actual: {task}")
 
     def set_device_task(self, serial, task):
         self.device_tasks[serial] = task
@@ -806,30 +820,223 @@ class ProfessionalPhoneController:
             self.log(f"[{device}] No se pudo leer el tamaño de pantalla: {error}")
             return None
 
+    def route_device_log(self, message):
+        for serial in self.devices:
+            if f"[{serial}]" in message or message.endswith(f": {serial}"):
+                self.append_device_log(serial, message)
+                break
+
+    def append_device_log(self, device, message):
+        widget = self.device_log_texts.get(device)
+        if widget is None or not widget.winfo_exists():
+            return
+        widget.config(state="normal")
+        widget.insert(tk.END, f"[{time.strftime('%H:%M:%S')}] {message}\n")
+        line_count = int(widget.index("end-1c").split(".")[0])
+        if line_count > 400:
+            widget.delete("1.0", f"{line_count - 350}.0")
+        widget.see(tk.END)
+        widget.config(state="disabled")
+
+    def open_device_log_window(self, device, x, y, width, height):
+        existing = self.device_log_windows.get(device)
+        if existing is not None and existing.winfo_exists():
+            existing.geometry(f"{width}x{height}+{x}+{y}")
+            existing.deiconify()
+            existing.lift()
+            return
+
+        window = tk.Toplevel(self.root)
+        window.title(f"Log — {self.display_device_name(device)} [{device}]")
+        window.geometry(f"{width}x{height}+{x}+{y}")
+        window.minsize(300, 110)
+
+        header = ttk.Frame(window, padding=(8, 5))
+        header.pack(fill="x")
+        ttk.Label(
+            header,
+            text=f"{self.display_device_name(device)}  ·  {device}",
+            font=("Segoe UI", 9, "bold"),
+        ).pack(side="left")
+        ttk.Button(
+            header,
+            text="Cerrar pantalla",
+            command=lambda dev=device: self.close_device_screen(dev),
+        ).pack(side="right")
+
+        status_var = tk.StringVar(value=f"Tarea actual: {self.device_tasks.get(device, 'Listo')}")
+        ttk.Label(window, textvariable=status_var, foreground="#1d5f91").pack(fill="x", padx=8)
+        log_text = scrolledtext.ScrolledText(
+            window,
+            bg="#1e1e1e",
+            fg="#58e36b",
+            font=("Consolas", 8),
+            height=5,
+            state="disabled",
+        )
+        log_text.pack(fill="both", expand=True, padx=6, pady=(3, 6))
+
+        self.device_log_windows[device] = window
+        self.device_log_texts[device] = log_text
+        self.device_log_status_vars[device] = status_var
+        window.protocol("WM_DELETE_WINDOW", lambda dev=device: self.close_device_screen(dev))
+        self.append_device_log(device, f"[{device}] Monitor individual preparado.")
+
+    def close_device_log_window(self, device):
+        window = self.device_log_windows.pop(device, None)
+        self.device_log_texts.pop(device, None)
+        self.device_log_status_vars.pop(device, None)
+        if window is not None:
+            try:
+                if window.winfo_exists():
+                    window.destroy()
+            except tk.TclError:
+                pass
+
+    def screen_layout(self, device_count):
+        screen_width = max(800, self.root.winfo_screenwidth())
+        screen_height = max(600, self.root.winfo_screenheight() - 45)
+        margin = 8
+        preferred_width = 420
+        max_columns = max(1, screen_width // (preferred_width + margin))
+        columns = min(device_count, max_columns)
+        rows = max(1, math.ceil(device_count / columns))
+        cell_width = min(preferred_width, (screen_width - margin * (columns + 1)) // columns)
+        total_width = columns * cell_width + (columns - 1) * margin
+        origin_x = max(margin, (screen_width - total_width) // 2)
+        cell_height = max(360, (screen_height - margin * (rows + 1)) // rows)
+        log_height = max(120, min(185, int(cell_height * 0.24)))
+        phone_height = max(220, cell_height - log_height - 38)
+        return origin_x, margin, columns, cell_width, cell_height, phone_height, log_height, margin
+
+    def align_device_log_to_screen(self, device, screen_title, log_title, log_height, proc):
+        if os.name != "nt":
+            return
+        try:
+            user32 = ctypes.WinDLL("user32", use_last_error=True)
+            for _ in range(30):
+                if self.app_closing.is_set() or proc.poll() is not None:
+                    return
+                screen_handle = user32.FindWindowW(None, screen_title)
+                log_handle = user32.FindWindowW(None, log_title)
+                if screen_handle and log_handle:
+                    rect = wintypes.RECT()
+                    if user32.GetWindowRect(screen_handle, ctypes.byref(rect)):
+                        width = max(300, rect.right - rect.left)
+                        user32.MoveWindow(
+                            log_handle,
+                            rect.left,
+                            rect.bottom,
+                            width,
+                            log_height,
+                            True,
+                        )
+                        self.log(
+                            f"[{device}] Log alineado debajo de la pantalla con ancho real de {width}px."
+                        )
+                        return
+                time.sleep(0.20)
+            self.log(f"[{device}] No se pudo confirmar la alineación exacta del log.")
+        except Exception as error:
+            self.log(f"[{device}] Error al alinear el log individual: {error}")
+
+    def open_all_screens(self):
+        if not self.devices:
+            return messagebox.showwarning("Aviso", "No hay celulares conectados.")
+        self.device_table.selection_set(self.devices)
+        self.update_selection_label()
+        self.open_selected_screens()
+
     def open_selected_screens(self):
         devs = self.get_selected_devices()
-        if not devs or not self.scrcpy: return
-        cols = max(1, math.ceil(math.sqrt(len(devs) * 0.8))) 
+        if not devs:
+            return messagebox.showwarning("Aviso", "Selecciona al menos un celular.")
+        if not self.scrcpy:
+            return messagebox.showerror("Error", "No se encontró scrcpy en la carpeta herramientas.")
+        origin_x, origin_y, cols, cell_w, cell_h, phone_h, log_h, margin = self.screen_layout(len(devs))
         for i, dev in enumerate(devs):
-            if dev in self.scrcpy_processes and self.scrcpy_processes[dev].poll() is None: continue
-            x, y = (i % cols) * 320, (i // cols) * 640
-            cmd = [self.scrcpy, "-s", dev, "--window-title", self.display_device_name(dev), f"--window-x={x}", f"--window-y={y}", "--max-size=600", "--max-fps=24", "--bit-rate=2M"]
+            column, row = i % cols, i // cols
+            x = origin_x + column * (cell_w + margin)
+            y = origin_y + row * cell_h
+            log_y = y + phone_h + 30
+            screen_title = f"{self.display_device_name(dev)} [{dev}]"
+            log_title = f"Log — {self.display_device_name(dev)} [{dev}]"
+            existing = self.scrcpy_processes.get(dev)
+            if existing is not None and existing.poll() is None:
+                self.scrcpy_processes.pop(dev, None)
+                existing.terminate()
+                try: existing.wait(timeout=2)
+                except Exception: pass
+            self.open_device_log_window(dev, x, log_y, cell_w, log_h)
+            cmd = [
+                self.scrcpy,
+                "-s", dev,
+                "--window-title", screen_title,
+                f"--window-x={x}",
+                f"--window-y={y}",
+                f"--window-width={cell_w}",
+                f"--window-height={phone_h}",
+                "--max-size=600",
+                "--max-fps=20",
+                "--video-bit-rate=1M",
+                "--no-audio",
+            ]
             try:
-                proc = subprocess.Popen(cmd, cwd=str(Path(self.scrcpy).parent), creationflags=CREATE_NEW_CONSOLE)
+                proc = subprocess.Popen(
+                    cmd,
+                    cwd=str(Path(self.scrcpy).parent),
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.STDOUT,
+                    text=True,
+                    errors="replace",
+                    bufsize=1,
+                    creationflags=NO_WINDOW,
+                )
                 self.scrcpy_processes[dev] = proc
                 self.set_device_task(dev, "Pantalla abierta")
+                self.log(f"[{dev}] Pantalla abierta sin consola CMD; log individual activo.")
                 threading.Thread(target=self.monitor_scrcpy_process, args=(dev, proc), daemon=True).start()
-            except Exception as e: self.log(f"Error scrcpy [{dev}]: {e}")
+                threading.Thread(
+                    target=self.align_device_log_to_screen,
+                    args=(dev, screen_title, log_title, log_h, proc),
+                    daemon=True,
+                ).start()
+            except Exception as e:
+                self.log(f"[{dev}] Error al abrir scrcpy: {e}")
+                self.close_device_log_window(dev)
 
     def monitor_scrcpy_process(self, dev, proc):
-        proc.wait()
+        try:
+            if proc.stdout is not None:
+                for line in proc.stdout:
+                    line = line.strip()
+                    if line:
+                        self.log(f"[{dev}] scrcpy: {line}")
+        except Exception as error:
+            self.log(f"[{dev}] No se pudo leer el estado de scrcpy: {error}")
+        return_code = proc.wait()
         if self.scrcpy_processes.get(dev) is proc:
             self.scrcpy_processes.pop(dev, None)
-            self.post_ui(lambda: self.restore_device_task(dev, "Pantalla abierta", None))
+            self.log(f"[{dev}] Pantalla cerrada (código {return_code}).")
+            self.post_ui(lambda d=dev: self.restore_device_task(d, "Pantalla abierta", None))
+            self.post_ui(lambda d=dev: self.close_device_log_window(d))
+
+    def close_device_screen(self, dev):
+        proc = self.scrcpy_processes.get(dev)
+        if proc is not None and proc.poll() is None:
+            proc.terminate()
+        else:
+            self.scrcpy_processes.pop(dev, None)
+            self.close_device_log_window(dev)
+            self.restore_device_task(dev, "Pantalla abierta", None)
 
     def close_selected_screens(self):
         for dev in self.get_selected_devices():
-            if dev in self.scrcpy_processes: self.scrcpy_processes[dev].terminate()
+            self.close_device_screen(dev)
+
+    def close_all_screens(self):
+        for dev in list(set(self.scrcpy_processes) | set(self.device_log_windows)):
+            self.close_device_screen(dev)
 
     def open_facebook_all(self):
         def task(dev):
@@ -1132,7 +1339,10 @@ class ProfessionalPhoneController:
                 comment_action_count += 1
         header = " ".join(top_text)
         explicit_header = bool(re.search(r"\b(?:publicacion|post)\s+de\b", header))
-        return explicit_header or (bottom_editor and comment_action_count >= 2)
+        # El editor inferior sólo aparece cuando una publicación está abierta.
+        # Algunas variantes de FB Lite omiten el título "Publicación de" y todavía
+        # no muestran comentarios, por lo que no exigimos varios botones Responder.
+        return explicit_header or bottom_editor or comment_action_count >= 2
 
     def has_ad_label_above(self, records, target_y, screen_height, max_distance_ratio=0.30):
         for record in records:
@@ -1657,6 +1867,193 @@ class ProfessionalPhoneController:
         self.search_results.see(tk.END)
         self.search_results.config(state="disabled")
 
+    def find_ocr_text_point(self, records, exact_labels=(), contains_labels=()):
+        exact = {self.normalize_search_text(label).strip() for label in exact_labels}
+        contains = tuple(self.normalize_search_text(label).strip() for label in contains_labels)
+        candidates = []
+        for record in records or []:
+            bounds = record.get("bounds")
+            text_value = self.normalize_search_text(record.get("text", "")).strip()
+            if not bounds or not text_value:
+                continue
+            priority = 0 if text_value in exact else 1 if any(label in text_value for label in contains) else None
+            if priority is None:
+                continue
+            left, top, right, bottom = bounds
+            candidates.append((priority, top, ((left + right) // 2, (top + bottom) // 2)))
+        if not candidates:
+            return None
+        candidates.sort(key=lambda item: (item[0], item[1]))
+        return candidates[0][2]
+
+    def facebook_is_foreground(self, device):
+        try:
+            output = self.adb_capture(device, ["shell", "dumpsys", "activity", "activities"], timeout=15)
+            resumed = next((line for line in output.splitlines() if "mResumedActivity" in line), "")
+            return "com.facebook.lite" in resumed or "com.facebook.katana" in resumed
+        except Exception:
+            return False
+
+    def read_pasted_facebook_url(self, hierarchy):
+        if hierarchy is None:
+            return None
+        for node in hierarchy.iter("node"):
+            for attribute in ("text", "content-desc"):
+                value = node.attrib.get(attribute, "").strip()
+                for candidate in re.findall(r"https?://[^\s]+", value):
+                    candidate = candidate.rstrip(".,);]}")
+                    if self.is_facebook_url(candidate):
+                        return candidate
+        return None
+
+    def return_from_settings_to_post(self, device):
+        for _ in range(5):
+            if self.facebook_is_foreground(device):
+                break
+            self.run_on_device(device, ["shell", "input", "keyevent", "4"])
+            if self.wait_or_cancel(0.35, self.search_stop_event):
+                return
+        if self.facebook_is_foreground(device):
+            # Copiar enlace conserva dos hojas inferiores abiertas en FB Lite.
+            self.run_on_device(device, ["shell", "input", "keyevent", "4"])
+            self.wait_or_cancel(0.25, self.search_stop_event)
+            self.run_on_device(device, ["shell", "input", "keyevent", "4"])
+            self.wait_or_cancel(0.45, self.search_stop_event)
+
+    def capture_open_post_link(self, device, screen_size):
+        """Copia y lee el enlace de la publicación abierta sin instalar auxiliares."""
+        if not screen_size or self.search_stop_event.is_set():
+            return None
+        width, height = screen_size
+        hierarchy = self.get_android_hierarchy(device)
+        records = self.accessibility_text_records(hierarchy) + self.windows_ocr_records(device)
+        if not self.is_open_post_view(records, screen_size):
+            self.log(f"[{device}] No se confirmó una publicación abierta; no se intentó copiar su enlace.")
+            return None
+
+        # El menú de tres puntos está en el encabezado de la publicación abierta.
+        ok, detail = self.run_on_device(
+            device,
+            ["shell", "input", "tap", str(int(width * 0.94)), str(int(height * 0.135))],
+            timeout=15,
+        )
+        if not ok:
+            self.log(f"[{device}] No se pudo abrir el menú para obtener el enlace: {detail}")
+            return None
+        if self.wait_or_cancel(0.65, self.search_stop_event):
+            return None
+
+        more_point = self.find_ocr_text_point(
+            self.windows_ocr_records(device),
+            exact_labels=("Más opciones", "More options"),
+        )
+        if not more_point:
+            self.log(f"[{device}] El menú no mostró la opción exacta Más opciones; no se tocó otra alternativa.")
+            self.run_on_device(device, ["shell", "input", "keyevent", "4"])
+            return None
+        self.run_on_device(device, ["shell", "input", "tap", str(more_point[0]), str(more_point[1])])
+        if self.wait_or_cancel(0.65, self.search_stop_event):
+            return None
+
+        copy_point = self.find_ocr_text_point(
+            self.windows_ocr_records(device),
+            exact_labels=("Copiar enlace", "Copy link"),
+        )
+        if not copy_point:
+            self.log(f"[{device}] No apareció la opción exacta Copiar enlace; el enlace no se capturó.")
+            self.run_on_device(device, ["shell", "input", "keyevent", "4"])
+            self.run_on_device(device, ["shell", "input", "keyevent", "4"])
+            return None
+        self.run_on_device(device, ["shell", "input", "tap", str(copy_point[0]), str(copy_point[1])])
+
+        copied = False
+        for _ in range(3):
+            if self.wait_or_cancel(0.20, self.search_stop_event):
+                return None
+            toast_records = self.windows_ocr_records(device)
+            if self.find_ocr_text_point(
+                toast_records,
+                contains_labels=("Enlace copiado correctamente", "Link copied"),
+            ):
+                copied = True
+                break
+        if not copied:
+            self.log(f"[{device}] Facebook no confirmó que el enlace se copiara; no se usará el portapapeles anterior.")
+            self.run_on_device(device, ["shell", "input", "keyevent", "4"])
+            self.run_on_device(device, ["shell", "input", "keyevent", "4"])
+            return None
+
+        try:
+            self.run_on_device(device, ["shell", "am", "start", "-a", "android.settings.SETTINGS"])
+            if self.wait_or_cancel(0.80, self.search_stop_event):
+                return None
+            settings_hierarchy = self.get_android_hierarchy(device)
+            search_point = self.find_accessible_control(
+                settings_hierarchy,
+                exact_labels=("Buscar ajustes", "Search settings"),
+                screen_size=screen_size,
+                allow_nonclickable=True,
+            )
+            if not search_point:
+                self.log(f"[{device}] No se localizó la búsqueda de Ajustes para leer el enlace copiado.")
+                return None
+            self.run_on_device(device, ["shell", "input", "tap", str(search_point[0]), str(search_point[1])])
+            if self.wait_or_cancel(0.65, self.search_stop_event):
+                return None
+            self.run_on_device(device, ["shell", "input", "keyevent", "279"])
+            if self.wait_or_cancel(0.45, self.search_stop_event):
+                return None
+            pasted_hierarchy = self.get_android_hierarchy(device)
+            url = self.read_pasted_facebook_url(pasted_hierarchy)
+            if not url:
+                # Algunos teclados necesitan terminar de enfocarse antes de aceptar KEYCODE_PASTE.
+                if self.wait_or_cancel(0.40, self.search_stop_event):
+                    return None
+                self.run_on_device(device, ["shell", "input", "keyevent", "279"])
+                if self.wait_or_cancel(0.45, self.search_stop_event):
+                    return None
+                pasted_hierarchy = self.get_android_hierarchy(device)
+                url = self.read_pasted_facebook_url(pasted_hierarchy)
+            if url:
+                self.log(f"[{device}] Enlace de publicación capturado: {url}")
+            else:
+                self.log(f"[{device}] El contenido pegado no fue un enlace válido de Facebook.")
+            return url
+        finally:
+            self.return_from_settings_to_post(device)
+
+    def save_search_link_record(self, device, snapshot, url):
+        if not url:
+            return None, False
+        self.search_record_dir.mkdir(parents=True, exist_ok=True)
+        path = self.search_record_dir / f"enlaces_{time.strftime('%Y-%m-%d')}.csv"
+        fields = ("fecha_hora", "serie", "nombre", "palabras", "enlace", "fecha_publicacion", "vista_previa")
+        with self.search_record_lock:
+            existing = set()
+            if path.exists():
+                try:
+                    with path.open("r", encoding="utf-8-sig", newline="") as handle:
+                        existing = {row.get("enlace", "") for row in csv.DictReader(handle)}
+                except Exception as error:
+                    self.log(f"[{device}] No se pudo revisar el registro diario: {error}")
+            if url in existing:
+                return path, False
+            write_header = not path.exists() or path.stat().st_size == 0
+            with path.open("a", encoding="utf-8-sig", newline="") as handle:
+                writer = csv.DictWriter(handle, fieldnames=fields)
+                if write_header:
+                    writer.writeheader()
+                writer.writerow({
+                    "fecha_hora": time.strftime("%Y-%m-%d %H:%M:%S"),
+                    "serie": device,
+                    "nombre": self.display_device_name(device),
+                    "palabras": ", ".join(snapshot.get("matches", [])),
+                    "enlace": url,
+                    "fecha_publicacion": snapshot.get("timestamp_text", ""),
+                    "vista_previa": snapshot.get("preview", ""),
+                })
+        return path, True
+
     def clear_search_results(self):
         if self.search_running: return
         self.search_results.config(state="normal"); self.search_results.delete("1.0", tk.END); self.search_results.config(state="disabled")
@@ -1989,6 +2386,8 @@ class ProfessionalPhoneController:
                         continue
                     if self.wait_or_cancel(1.8, self.search_stop_event):
                         break
+                    post_url = self.capture_open_post_link(dev, size)
+                    record_path, link_added = self.save_search_link_record(dev, snapshot, post_url)
                     like_result = None
                     comment_result = None
                     if like_on_match or comment_on_match:
@@ -2012,6 +2411,8 @@ class ProfessionalPhoneController:
                         "matches": snapshot["matches"],
                         "preview": snapshot["preview"],
                         "timestamp": snapshot["timestamp_text"],
+                        "url": post_url,
+                        "record_path": str(record_path) if record_path else "",
                     }
                     details = []
                     if like_result:
@@ -2019,11 +2420,14 @@ class ProfessionalPhoneController:
                     if comment_result:
                         details.append(f"Comentario: {comment_result}")
                     suffix = f" · {' · '.join(details)}" if details else " · publicación abierta"
+                    link_text = post_url or "no disponible"
+                    record_text = " · guardado en registro diario" if post_url and link_added else ""
                     status = "La búsqueda continúa; pulsa Detener." if continuous else "Coincidencia encontrada."
                     self.post_ui(
                         lambda m=(
                             f"Coincidencia #{found_count} en {dev}: "
-                            f"{', '.join(snapshot['matches'])}{suffix}"
+                            f"{', '.join(snapshot['matches'])}{suffix}\n"
+                            f"Enlace: {link_text}{record_text}"
                         ), st=status, c=ctx: self.report_match(m, st, c)
                     )
                     if comment_result and comment_result not in {"sent", "sent_late_confirmed", "sent_after_retry", "cancelled"}:
