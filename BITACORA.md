@@ -21,6 +21,30 @@ Ninguno.
 
 ## Cambios completados
 
+### CHG-20261106-0946 — No omitir una publicación normal después de publicidad
+
+- Fecha y hora de inicio: 2026-11-06 09:46:00 (America/Mexico_City)
+- Estado: Completado localmente el 2026-11-06 09:49:00 (America/Mexico_City)
+- Tipo: Corrección funcional solicitada
+- Problema observado: Búsqueda omitió una publicación de `Voltaje Noticias` que contenía `Huauchinango`, mostraba `14 min ·` y no era publicidad; por lo tanto no abrió la publicación ni obtuvo su enlace.
+- Diagnóstico real:
+  - Android no expuso el texto de la tarjeta, pero el OCR sí reconoció `Huauchinango` y `14 min`.
+  - La asociación aislada produjo correctamente el punto de fecha `(172, 389)` y no detectó rótulos publicitarios.
+  - El descarte provino de `ad_guard`: después de un anuncio se omitían dos pantallas completas, incluso cuando ya aparecía una publicación nueva con fecha válida.
+- Implementación:
+  - La protección posterior a publicidad continúa descartando pantallas sin una publicación nueva validada.
+  - Si aparece una coincidencia asociada a una fecha/hora válida, se cancela la protección anterior y se procesa la publicación normalmente.
+- Pruebas realizadas:
+  - Compilación de Python y `git diff --check`: correctos.
+  - Captura real reportada: coincidencia `huauchinango`, fecha `14 min`, punto `(172, 389)` y cero rótulos publicitarios.
+  - Simulación con protección publicitaria activa: la publicación real con fecha válida queda autorizada.
+  - Simulación de continuación sin fecha: permanece rechazada.
+  - Prueba real completa sobre la publicación omitida: se abrió mediante `14 min`, se capturó `https://www.facebook.com/share/p/19nmGJVp2W/` y se agregó al CSV diario.
+- Referencia de rollback: commit `1c6faff` de la rama `integracion`.
+- Rama Git: `integracion`.
+- Hash de `panel.py`: `464752FC84F396608E44C19A0C52ACF148B7C58C313B41F11EE25DE601AF219D`.
+- Hash de `LEEME.txt`: `58E9B792645D6C3FE5793CFA10AAB23632E2936F754258A8E806670BDDB8ED08`.
+
 ### CHG-20261106-0614 — Captura y registro del enlace de cada coincidencia
 
 - Fecha y hora de inicio: 2026-11-06 06:14:42 (America/Mexico_City)

@@ -2360,11 +2360,17 @@ class ProfessionalPhoneController:
                         ad_guard[dev] = 2
                         self.log(f"[{dev}] Publicidad detectada; se ignora el bloque completo y su continuación.")
                         continue
-                    if ad_guard[dev] > 0:
-                        ad_guard[dev] -= 1
-                        self.log(f"[{dev}] Se omite la continuación visible del bloque publicitario.")
-                        continue
                     snapshot = self.find_post_match_snapshot(records, norm_keys, size)
+                    if ad_guard[dev] > 0:
+                        if snapshot is None:
+                            ad_guard[dev] -= 1
+                            self.log(f"[{dev}] Se omite la continuación visible del bloque publicitario.")
+                            continue
+                        ad_guard[dev] = 0
+                        self.log(
+                            f"[{dev}] Se detectó una publicación nueva con fecha/hora válida; "
+                            "finaliza la protección del anuncio anterior."
+                        )
                     if snapshot is None:
                         continue
                     fingerprint = (dev, hash(snapshot["fingerprint"]))
