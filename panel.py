@@ -581,6 +581,12 @@ class ProfessionalPhoneController:
             text='👍 Me gusta',
             variable=self.search_like_var,
         ).pack(side="left")
+        self.search_save_link_var = tk.BooleanVar(value=True)
+        ttk.Checkbutton(
+            action_checks,
+            text='Guardar enlace',
+            variable=self.search_save_link_var,
+        ).pack(side="left", padx=(18, 0))
         self.search_comment_var = tk.BooleanVar(value=False)
         ttk.Checkbutton(
             action_checks,
@@ -2090,6 +2096,7 @@ class ProfessionalPhoneController:
                 devices,
                 keys,
                 bool(self.search_like_var.get()),
+                bool(self.search_save_link_var.get()),
                 comment_on_match,
                 comment_text,
                 like_min,
@@ -2322,6 +2329,7 @@ class ProfessionalPhoneController:
         devices,
         keys,
         like_on_match=False,
+        save_link_on_match=True,
         comment_on_match=False,
         comment_text="",
         like_min=3,
@@ -2379,37 +2387,48 @@ class ProfessionalPhoneController:
                     if len(seen) >= 1000:
                         seen.clear()
                     seen.add(fingerprint)
-                    point = snapshot["timestamp_point"]
-                    self.log(
-                        f"[{dev}] Coincidencia asociada a fecha/hora '{snapshot['timestamp_text']}' "
-                        f"por {snapshot['source']}; abriendo en {point}."
-                    )
-                    ok, detail = self.run_on_device(
-                        dev, ["shell", "input", "tap", str(point[0]), str(point[1])], timeout=15
-                    )
-                    if not ok:
-                        self.log(f"[{dev}] No se pudo abrir la publicación coincidente: {detail}")
-                        continue
-                    if self.wait_or_cancel(1.8, self.search_stop_event):
-                        break
-                    post_url = self.capture_open_post_link(dev, size)
-                    record_path, link_added = self.save_search_link_record(dev, snapshot, post_url)
+                    should_open_post = save_link_on_match or like_on_match or comment_on_match
+                    post_url = None
+                    record_path = None
+                    link_added = False
                     like_result = None
                     comment_result = None
-                    if like_on_match or comment_on_match:
-                        chosen_wait = random.randint(like_min, like_max)
-                        self.post_ui(
-                            lambda d=dev, s=chosen_wait: self.search_status_var.set(
-                                f"Publicación abierta en {d}; acciones en {s} s. Pulsa Detener para cancelar."
-                            )
+                    if should_open_post:
+                        point = snapshot["timestamp_point"]
+                        self.log(
+                            f"[{dev}] Coincidencia asociada a fecha/hora '{snapshot['timestamp_text']}' "
+                            f"por {snapshot['source']}; abriendo en {point}."
                         )
-                        if self.wait_or_cancel(chosen_wait, self.search_stop_event):
+                        ok, detail = self.run_on_device(
+                            dev, ["shell", "input", "tap", str(point[0]), str(point[1])], timeout=15
+                        )
+                        if not ok:
+                            self.log(f"[{dev}] No se pudo abrir la publicación coincidente: {detail}")
+                            continue
+                        if self.wait_or_cancel(1.8, self.search_stop_event):
                             break
-                    if like_on_match:
-                        like_result = self.perform_search_post_like(dev)
-                    if comment_on_match and not self.search_stop_event.is_set():
-                        comment_result = self.perform_search_post_comment(
-                            dev, self.parse_spintax(comment_text)
+                        if save_link_on_match:
+                            post_url = self.capture_open_post_link(dev, size)
+                            record_path, link_added = self.save_search_link_record(dev, snapshot, post_url)
+                        if like_on_match or comment_on_match:
+                            chosen_wait = random.randint(like_min, like_max)
+                            self.post_ui(
+                                lambda d=dev, s=chosen_wait: self.search_status_var.set(
+                                    f"Publicación abierta en {d}; acciones en {s} s. Pulsa Detener para cancelar."
+                                )
+                            )
+                            if self.wait_or_cancel(chosen_wait, self.search_stop_event):
+                                break
+                        if like_on_match:
+                            like_result = self.perform_search_post_like(dev)
+                        if comment_on_match and not self.search_stop_event.is_set():
+                            comment_result = self.perform_search_post_comment(
+                                dev, self.parse_spintax(comment_text)
+                            )
+                    else:
+                        self.log(
+                            f"[{dev}] Coincidencia asociada a fecha/hora '{snapshot['timestamp_text']}' "
+                            "contabilizada sin abrir la publicación."
                         )
                     found_count += 1
                     ctx = {
@@ -2425,15 +2444,23 @@ class ProfessionalPhoneController:
                         details.append(f"Me gusta: {like_result}")
                     if comment_result:
                         details.append(f"Comentario: {comment_result}")
-                    suffix = f" · {' · '.join(details)}" if details else " · publicación abierta"
-                    link_text = post_url or "no disponible"
-                    record_text = " · guardado en registro diario" if post_url and link_added else ""
+                    if details:
+                        suffix = f" · {' · '.join(details)}"
+                    elif should_open_post:
+                        suffix = " · publicación abierta"
+                    else:
+                        suffix = " · coincidencia contabilizada"
+                    link_line = ""
+                    if save_link_on_match:
+                        link_text = post_url or "no disponible"
+                        record_text = " · guardado en registro diario" if post_url and link_added else ""
+                        link_line = f"\nEnlace: {link_text}{record_text}"
                     status = "La búsqueda continúa; pulsa Detener." if continuous else "Coincidencia encontrada."
                     self.post_ui(
                         lambda m=(
                             f"Coincidencia #{found_count} en {dev}: "
-                            f"{', '.join(snapshot['matches'])}{suffix}\n"
-                            f"Enlace: {link_text}{record_text}"
+                            f"{', '.join(snapshot['matches'])}{suffix}"
+                            f"{link_line}"
                         ), st=status, c=ctx: self.report_match(m, st, c)
                     )
                     if comment_result and comment_result not in {"sent", "sent_late_confirmed", "sent_after_retry", "cancelled"}:
@@ -2441,7 +2468,8 @@ class ProfessionalPhoneController:
                             f"[{dev}] Comentario sin confirmación final ({comment_result}); "
                             "se saldrá de la publicación y continuará la búsqueda."
                         )
-                    self.return_to_feed_after_post(dev)
+                    if should_open_post:
+                        self.return_to_feed_after_post(dev)
                     if not continuous:
                         stop_after_match = True
                         break

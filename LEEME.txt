@@ -32,7 +32,7 @@ BÚSQUEDA ASISTIDA POR PALABRAS (ESCUCHA SOCIAL / MONITOREO)
 Esta función permite revisar el contenido visible en pantalla sin interactuar a ciegas.
 1. Abre Facebook en los celulares y ve a la sección deseada.
 2. En la pestaña "Búsqueda (Escucha)", ingresa palabras o frases separadas por comas. Cada elemento se evalúa como una alternativa: basta que coincida uno.
-3. Opcionalmente marca `Me gusta`, `Comentario` o ambas acciones. Para Comentario, escribe el texto correspondiente; ambas opciones están desactivadas inicialmente.
+3. Opcionalmente marca `Me gusta`, `Guardar enlace`, `Comentario` o una combinación. `Guardar enlace` está activada inicialmente para conservar el comportamiento de registro; Me gusta y Comentario están desactivadas. Para Comentario, escribe el texto correspondiente.
 4. Configura el tiempo mínimo y máximo antes de ejecutar las acciones dentro de una publicación coincidente.
 5. El panel analiza el texto por accesibilidad. Si Facebook Lite no expone texto, utiliza el OCR local de Windows en español; las capturas temporales se eliminan después de cada lectura.
 6. Antes de buscar, localiza `… Ver más` dentro del cuerpo de las publicaciones visibles, lo pulsa y vuelve a leer la pantalla ya expandida. Excluye `Ver más comentarios`, respuestas, grupos, personas y traducciones.
@@ -50,6 +50,7 @@ Esta función permite revisar el contenido visible en pantalla sin interactuar a
 18. Se realizan hasta cinco comprobaciones y una última validación tardía antes de autorizar el único reintento. Si tampoco aparece después del reintento, el panel sale de la publicación y continúa el scroll sin detener toda la búsqueda.
 19. Al abrir una coincidencia, Búsqueda obtiene el enlace usando exclusivamente `Más opciones` y `Copiar enlace`. Para leer el portapapeles del teléfono lo pega temporalmente en la búsqueda de Ajustes, regresa a Facebook y muestra `Enlace:` debajo de la coincidencia. No instala aplicaciones ni publica el contenido pegado.
 20. Los enlaces válidos se guardan en `registros_busqueda/enlaces_AAAA-MM-DD.csv` con dispositivo, palabras, fecha de la publicación y vista previa. Un mismo enlace no se duplica dentro del archivo del día. Si Facebook cambia los rótulos o no confirma la copia, el panel muestra `Enlace: no disponible` y continúa sin tocar otra opción.
+21. Si `Guardar enlace` está desactivada y no se seleccionan Me gusta ni Comentario, la coincidencia sólo se contabiliza: no se abre la publicación, no se consultan sus menús y no se modifica el CSV. Si otra acción está marcada, la publicación se abre para esa acción, pero el enlace no se obtiene ni se muestra.
 
 ACCIONES SOBRE UNA PUBLICACIÓN
 - Marca `Me gusta`, `Comentario` o ambas casillas y pulsa `Ejecutar acciones seleccionadas`. Cuando ambas están activas, el panel completa primero Me gusta y después Comentario usando la misma URL y los mismos teléfonos seleccionados.

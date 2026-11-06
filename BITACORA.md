@@ -21,6 +21,27 @@ Ninguno.
 
 ## Cambios completados
 
+### CHG-20261106-0950 — Casilla Guardar enlace en Búsqueda
+
+- Fecha y hora de inicio: 2026-11-06 09:50:00 (America/Mexico_City)
+- Estado: Completado localmente el 2026-11-06 09:52:10 (America/Mexico_City)
+- Tipo: Mejora funcional solicitada
+- Objetivo: Añadir una casilla `Guardar enlace` antes de `Comentario` en la pestaña Búsqueda.
+- Implementación:
+  - La nueva casilla aparece entre `Me gusta` y `Comentario` y comienza activada para conservar el comportamiento anterior.
+  - Activada: abre la publicación, obtiene el enlace y lo registra en el CSV diario.
+  - Desactivada y sin otras acciones: contabiliza y muestra la coincidencia sin abrir la publicación, consultar menús ni modificar el CSV.
+  - Desactivada con Me gusta o Comentario activos: abre la publicación únicamente para las acciones seleccionadas; no obtiene ni muestra una línea de enlace.
+- Pruebas realizadas:
+  - Compilación de Python y `git diff --check`: correctos.
+  - Casilla desactivada sin otras acciones: cero toques, cero capturas, cero escrituras y resultado `coincidencia contabilizada`.
+  - Casilla activada: apertura, captura, registro y regreso al feed en el orden esperado.
+  - El resultado no muestra `Enlace: no disponible` cuando la captura fue desactivada voluntariamente.
+- Referencia de rollback: commit `52bfb6f` de la rama `integracion`.
+- Rama Git: `integracion`.
+- Hash de `panel.py`: `2B150E7FB82BD55BA70A069F2CFDF77F24115C062A81347107F9EAFC5798CE11`.
+- Hash de `LEEME.txt`: `7C5350AE9A70F4106675A864C9974F0AAE4B6BC82097D75DD5C7B92B6C5F577F`.
+
 ### CHG-20261106-0946 — No omitir una publicación normal después de publicidad
 
 - Fecha y hora de inicio: 2026-11-06 09:46:00 (America/Mexico_City)
