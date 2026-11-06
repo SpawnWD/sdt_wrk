@@ -64,6 +64,18 @@ ACCIONES SOBRE UNA PUBLICACIÓN
 - En Interacciones, activa "Clic calculado por figura" para que el panel reconozca la silueta de la manita y el globo de comentario mediante bordes y escala, en lugar de depender de una posición absoluta. El número de desplazamientos de búsqueda es configurable.
 - "Solo Me gusta" analiza la publicación al abrirla y repite el análisis después de cada desplazamiento configurado. Acepta el rótulo exacto aunque Facebook Lite lo exponga dentro de un elemento hijo; si aparece "Quitar Me gusta", no vuelve a tocarlo.
 - Con clic calculado, "Solo Me gusta" utiliza desplazamientos largos de aproximadamente 48% de la pantalla y vuelve a analizar después de cada uno hasta localizar la figura. Si la figura aparece azul, la considera activa y no vuelve a pulsarla.
+
+SECUENCIAS DE ACCIONES
+- Esta pestaña es un constructor visual independiente; no cambia las funciones de Búsqueda, Interacciones ni Reportes.
+- Selecciona exactamente un teléfono y pulsa `Capturar teléfono seleccionado`. Después, pulsa sobre la imagen para registrar un toque.
+- Los toques se guardan como porcentaje de ancho y alto, por lo que se adaptan a resoluciones diferentes sin reutilizar una coordenada absoluta.
+- `Agregar espera` incorpora una pausa de 0.1 a 3600 segundos. `Agregar Atrás` registra el botón Atrás de Android.
+- La lista permite subir, bajar, eliminar o limpiar pasos. Los marcadores rojos numerados muestran los toques sobre la captura.
+- `Ejecutar paso seleccionado` prueba únicamente el renglón elegido. `Ejecutar secuencia completa` procesa todos los pasos en orden sobre los teléfonos seleccionados.
+- `Detener` cancela la espera o evita que comience el siguiente paso. Cada teléfono muestra su tarea y recibe mensajes individuales en el log.
+- `Guardar` y `Cargar` utilizan archivos JSON versión 1 dentro de `secuencias`. La carpeta es operativa y se excluye de Git.
+- Los archivos cargados aceptan como máximo 500 pasos y sólo permiten `tap`, `wait` y `back`; cualquier estructura desconocida se rechaza.
+- Esta primera versión no captura toques físicos, no contiene acciones específicas de reportes, no rota IP y no ejecuta calentamiento.
 - Cuando Android no expone ese control, puede utilizar la plantilla visual like.png como respaldo. Ya no se pulsa una coordenada fija.
 - "Solo comentario" busca el campo accesible "Escribe un comentario" / "Write a comment" al abrir y después de cada desplazamiento configurado. Acepta esos rótulos exactos y el botón exacto de publicación aunque Facebook Lite los exponga como elementos hijos; no usa coordenadas fijas como respaldo.
 - También acepta `Comenta como…`, `Comment as…`, `MultiAutoCompleteTextView` y un respaldo geométrico inferior centrado para publicaciones compartidas o republicadas.

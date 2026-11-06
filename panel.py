@@ -77,6 +77,7 @@ class ProfessionalPhoneController:
         self.advanced_stop_event = threading.Event()
         self.maintenance_stop_event = threading.Event()
         self.interaction_stop_event = threading.Event()
+        self.sequence_stop_event = threading.Event()
         self.app_closing = threading.Event()
         
         self.search_running = False
@@ -85,12 +86,14 @@ class ProfessionalPhoneController:
         self.advanced_running = False
         self.maintenance_running = False
         self.interaction_running = False
+        self.sequence_running = False
         self.interaction_devices = set()
         self.combined_next_action = None
         self.screen_size_cache = {}
         
         self.device_config_file = BASE_DIR / "dispositivos.json"
         self.search_record_dir = BASE_DIR / "registros_busqueda"
+        self.sequence_dir = BASE_DIR / "secuencias"
         self.templates_dir = BASE_DIR / "templates"
         self.templates_dir.mkdir(exist_ok=True)
 
@@ -107,6 +110,10 @@ class ProfessionalPhoneController:
         self.device_log_status_vars = {}
         self.search_devices = []
         self.pending_search_match = None
+        self.sequence_steps = []
+        self.sequence_capture_size = None
+        self.sequence_display_geometry = None
+        self.sequence_photo = None
         self.ocr_warning_shown = False
         self.first_device_scan = True
 
@@ -131,6 +138,7 @@ class ProfessionalPhoneController:
         self.tab_general = ttk.Frame(self.notebook)
         self.tab_interaction = ttk.Frame(self.notebook)
         self.tab_search = ttk.Frame(self.notebook)
+        self.tab_sequence = ttk.Frame(self.notebook)
         self.tab_vision = ttk.Frame(self.notebook)
         self.tab_human = ttk.Frame(self.notebook)
         self.tab_report = ttk.Frame(self.notebook)
@@ -140,6 +148,7 @@ class ProfessionalPhoneController:
         self.notebook.add(self.tab_general, text=" Control General ")
         self.notebook.add(self.tab_interaction, text=" Interacciones FB Lite ")
         self.notebook.add(self.tab_search, text=" Búsqueda (Escucha) ")
+        self.notebook.add(self.tab_sequence, text=" Secuencias de acciones ")
         self.notebook.add(self.tab_vision, text=" Reacciones (OpenCV) ")
         self.notebook.add(self.tab_human, text=" 🛡️ Modo Humano ")
         self.notebook.add(self.tab_report, text=" 🚨 Reportes Masivos ")
@@ -149,6 +158,7 @@ class ProfessionalPhoneController:
         self.create_general_widgets()
         self.create_interaction_widgets()
         self.create_search_widgets()
+        self.create_sequence_widgets()
         self.create_vision_widgets()
         self.create_human_widgets()
         self.create_report_widgets()
@@ -162,7 +172,7 @@ class ProfessionalPhoneController:
     def auto_scan_worker(self):
         while not self.app_closing.is_set():
             time.sleep(4)
-            if not any([self.search_running, self.human_running, self.report_running, self.advanced_running, self.maintenance_running]):
+            if not any([self.search_running, self.sequence_running, self.human_running, self.report_running, self.advanced_running, self.maintenance_running]):
                 current = self.get_devices()
                 if set(current) != set(self.devices):
                     self.post_ui(self.refresh_devices_async)
@@ -626,6 +636,460 @@ class ProfessionalPhoneController:
         self.search_results = scrolledtext.ScrolledText(search_frame, height=5, font=("Consolas", 9), state="disabled")
         self.search_results.pack(fill="both", expand=True, pady=(3, 9))
 
+    def create_sequence_widgets(self):
+        sequence_frame = ttk.LabelFrame(
+            self.tab_sequence,
+            text=" Constructor visual de procedimientos ",
+            padding=10,
+        )
+        sequence_frame.pack(fill="both", expand=True, padx=10, pady=10)
+        ttk.Label(
+            sequence_frame,
+            text=(
+                "Selecciona un teléfono, captura su pantalla y pulsa sobre la imagen para registrar un toque. "
+                "La ejecución siempre puede detenerse."
+            ),
+            foreground="#1d5f91",
+        ).pack(fill="x", pady=(0, 7))
+
+        toolbar = ttk.Frame(sequence_frame)
+        toolbar.pack(fill="x", pady=(0, 7))
+        ttk.Button(toolbar, text="Capturar teléfono seleccionado", command=self.capture_sequence_screen).pack(side="left")
+        ttk.Button(toolbar, text="Agregar espera", command=self.add_sequence_wait).pack(side="left", padx=(7, 0))
+        ttk.Button(toolbar, text="Agregar Atrás", command=lambda: self.add_sequence_step({"type": "back"})).pack(side="left", padx=(7, 0))
+        ttk.Button(toolbar, text="Guardar", command=self.save_sequence_file).pack(side="right", padx=(7, 0))
+        ttk.Button(toolbar, text="Cargar", command=self.load_sequence_file).pack(side="right")
+
+        content = ttk.Panedwindow(sequence_frame, orient="horizontal")
+        content.pack(fill="both", expand=True)
+        preview_frame = ttk.LabelFrame(content, text=" Pantalla del teléfono ", padding=5)
+        steps_frame = ttk.LabelFrame(content, text=" Pasos registrados ", padding=5)
+        content.add(preview_frame, weight=3)
+        content.add(steps_frame, weight=2)
+
+        self.sequence_canvas = tk.Canvas(
+            preview_frame,
+            width=430,
+            height=540,
+            bg="#202020",
+            highlightthickness=1,
+            highlightbackground="#606060",
+            cursor="crosshair",
+        )
+        self.sequence_canvas.pack(fill="both", expand=True)
+        self.sequence_canvas.bind("<Button-1>", self.record_sequence_tap)
+
+        self.sequence_tree = ttk.Treeview(
+            steps_frame,
+            columns=("step", "type", "detail"),
+            show="headings",
+            height=18,
+            selectmode="browse",
+        )
+        self.sequence_tree.heading("step", text="#")
+        self.sequence_tree.heading("type", text="Acción")
+        self.sequence_tree.heading("detail", text="Detalle")
+        self.sequence_tree.column("step", width=40, anchor="center", stretch=False)
+        self.sequence_tree.column("type", width=85, anchor="w", stretch=False)
+        self.sequence_tree.column("detail", width=220, anchor="w")
+        self.sequence_tree.pack(fill="both", expand=True)
+
+        edit_row = ttk.Frame(steps_frame)
+        edit_row.pack(fill="x", pady=(6, 0))
+        ttk.Button(edit_row, text="Subir", command=lambda: self.move_sequence_step(-1)).pack(side="left")
+        ttk.Button(edit_row, text="Bajar", command=lambda: self.move_sequence_step(1)).pack(side="left", padx=(5, 0))
+        ttk.Button(edit_row, text="Eliminar", command=self.delete_sequence_step).pack(side="left", padx=(5, 0))
+        ttk.Button(edit_row, text="Limpiar", command=self.clear_sequence_steps).pack(side="right")
+
+        execution_row = ttk.Frame(sequence_frame)
+        execution_row.pack(fill="x", pady=(8, 4))
+        self.btn_sequence_step = ttk.Button(
+            execution_row,
+            text="Ejecutar paso seleccionado",
+            command=lambda: self.start_sequence_execution(single_step=True),
+            style="Primary.TButton",
+        )
+        self.btn_sequence_step.pack(side="left")
+        self.btn_sequence_all = ttk.Button(
+            execution_row,
+            text="Ejecutar secuencia completa",
+            command=lambda: self.start_sequence_execution(single_step=False),
+            style="Success.TButton",
+        )
+        self.btn_sequence_all.pack(side="left", padx=(7, 0))
+        self.btn_sequence_stop = ttk.Button(
+            execution_row,
+            text="Detener",
+            command=self.stop_sequence_execution,
+            style="Warning.TButton",
+            state="disabled",
+        )
+        self.btn_sequence_stop.pack(side="left", padx=(7, 0))
+        self.sequence_status_var = tk.StringVar(value="Secuencia lista. No hay pasos registrados.")
+        ttk.Label(
+            sequence_frame,
+            textvariable=self.sequence_status_var,
+            foreground="#1d5f91",
+            font=("Segoe UI", 9, "bold"),
+        ).pack(fill="x", pady=(2, 0))
+
+    def capture_sequence_screen(self):
+        if self.sequence_running:
+            return messagebox.showwarning("Secuencia activa", "Detén la ejecución antes de capturar otra pantalla.")
+        devices = self.get_selected_devices()
+        if len(devices) != 1:
+            return messagebox.showwarning("Selección", "Selecciona exactamente un teléfono para capturar su pantalla.")
+        device = devices[0]
+        self.sequence_status_var.set(f"Capturando pantalla de {self.display_device_name(device)}...")
+
+        def worker():
+            screen = self.capture_device_screen(device)
+            if screen is None:
+                self.post_ui(lambda: self.sequence_status_var.set("No se pudo capturar la pantalla."))
+                return
+            self.post_ui(lambda img=screen, dev=device: self.show_sequence_screen(dev, img))
+
+        threading.Thread(target=worker, daemon=True).start()
+
+    def show_sequence_screen(self, device, screen):
+        if screen is None or not OPENCV_AVAILABLE:
+            self.sequence_status_var.set("La vista previa requiere OpenCV.")
+            return
+        source_height, source_width = screen.shape[:2]
+        canvas_width = max(320, self.sequence_canvas.winfo_width())
+        canvas_height = max(420, self.sequence_canvas.winfo_height())
+        scale = min(canvas_width / source_width, canvas_height / source_height)
+        display_width = max(1, int(source_width * scale))
+        display_height = max(1, int(source_height * scale))
+        resized = cv2.resize(screen, (display_width, display_height), interpolation=cv2.INTER_AREA)
+        ok, encoded = cv2.imencode(".png", resized)
+        if not ok:
+            self.sequence_status_var.set("No se pudo preparar la vista previa.")
+            return
+        self.sequence_photo = tk.PhotoImage(data=base64.b64encode(encoded.tobytes()).decode("ascii"))
+        offset_x = (canvas_width - display_width) // 2
+        offset_y = (canvas_height - display_height) // 2
+        self.sequence_canvas.delete("all")
+        self.sequence_canvas.create_image(offset_x, offset_y, anchor="nw", image=self.sequence_photo)
+        self.sequence_capture_size = (source_width, source_height)
+        self.sequence_display_geometry = (offset_x, offset_y, display_width, display_height)
+        self.draw_sequence_markers()
+        self.sequence_status_var.set(
+            f"Captura de {self.display_device_name(device)}: {source_width} × {source_height}. Pulsa sobre la imagen para agregar un toque."
+        )
+
+    def record_sequence_tap(self, event):
+        if self.sequence_running or not self.sequence_capture_size or not self.sequence_display_geometry:
+            return
+        offset_x, offset_y, display_width, display_height = self.sequence_display_geometry
+        local_x, local_y = event.x - offset_x, event.y - offset_y
+        if not (0 <= local_x <= display_width and 0 <= local_y <= display_height):
+            return
+        source_width, source_height = self.sequence_capture_size
+        x_ratio = min(1.0, max(0.0, local_x / display_width))
+        y_ratio = min(1.0, max(0.0, local_y / display_height))
+        self.add_sequence_step({
+            "type": "tap",
+            "x_ratio": round(x_ratio, 6),
+            "y_ratio": round(y_ratio, 6),
+            "recorded_width": source_width,
+            "recorded_height": source_height,
+        })
+
+    def add_sequence_wait(self):
+        if self.sequence_running:
+            return
+        seconds = simpledialog.askfloat(
+            "Agregar espera",
+            "Segundos de espera (0.1 a 3600):",
+            minvalue=0.1,
+            maxvalue=3600.0,
+            initialvalue=1.0,
+            parent=self.root,
+        )
+        if seconds is not None:
+            self.add_sequence_step({"type": "wait", "seconds": round(float(seconds), 3)})
+
+    def add_sequence_step(self, step):
+        if self.sequence_running:
+            return
+        validated = self.validate_sequence_step(step)
+        if not validated:
+            return messagebox.showwarning("Paso no válido", "El paso no contiene una acción admitida.")
+        self.sequence_steps.append(validated)
+        self.refresh_sequence_tree(select_index=len(self.sequence_steps) - 1)
+        self.draw_sequence_markers()
+
+    def validate_sequence_step(self, step):
+        if not isinstance(step, dict):
+            return None
+        step_type = str(step.get("type", "")).strip().casefold()
+        if step_type == "tap":
+            try:
+                x_ratio = float(step["x_ratio"])
+                y_ratio = float(step["y_ratio"])
+            except (KeyError, TypeError, ValueError):
+                return None
+            if not (0.0 <= x_ratio <= 1.0 and 0.0 <= y_ratio <= 1.0):
+                return None
+            return {
+                "type": "tap",
+                "x_ratio": round(x_ratio, 6),
+                "y_ratio": round(y_ratio, 6),
+                "recorded_width": max(1, int(step.get("recorded_width", 1))),
+                "recorded_height": max(1, int(step.get("recorded_height", 1))),
+            }
+        if step_type == "wait":
+            try:
+                seconds = float(step["seconds"])
+            except (KeyError, TypeError, ValueError):
+                return None
+            if not 0.1 <= seconds <= 3600.0:
+                return None
+            return {"type": "wait", "seconds": round(seconds, 3)}
+        if step_type == "back":
+            return {"type": "back"}
+        return None
+
+    def sequence_step_description(self, step):
+        if step["type"] == "tap":
+            return "Toque", f"X {step['x_ratio'] * 100:.1f}% · Y {step['y_ratio'] * 100:.1f}%"
+        if step["type"] == "wait":
+            return "Espera", f"{step['seconds']:g} segundos"
+        return "Atrás", "Botón Atrás de Android"
+
+    def refresh_sequence_tree(self, select_index=None):
+        self.sequence_tree.delete(*self.sequence_tree.get_children())
+        for index, step in enumerate(self.sequence_steps):
+            action, detail = self.sequence_step_description(step)
+            self.sequence_tree.insert("", "end", iid=str(index), values=(index + 1, action, detail))
+        if select_index is not None and 0 <= select_index < len(self.sequence_steps):
+            self.sequence_tree.selection_set(str(select_index))
+            self.sequence_tree.focus(str(select_index))
+            self.sequence_tree.see(str(select_index))
+        self.sequence_status_var.set(f"Pasos registrados: {len(self.sequence_steps)}.")
+
+    def selected_sequence_index(self):
+        selection = self.sequence_tree.selection()
+        if not selection:
+            return None
+        try:
+            return int(selection[0])
+        except (TypeError, ValueError):
+            return None
+
+    def delete_sequence_step(self):
+        if self.sequence_running:
+            return
+        index = self.selected_sequence_index()
+        if index is None:
+            return
+        self.sequence_steps.pop(index)
+        self.refresh_sequence_tree(select_index=min(index, len(self.sequence_steps) - 1))
+        self.draw_sequence_markers()
+
+    def move_sequence_step(self, delta):
+        if self.sequence_running:
+            return
+        index = self.selected_sequence_index()
+        if index is None:
+            return
+        target = index + delta
+        if not 0 <= target < len(self.sequence_steps):
+            return
+        self.sequence_steps[index], self.sequence_steps[target] = self.sequence_steps[target], self.sequence_steps[index]
+        self.refresh_sequence_tree(select_index=target)
+        self.draw_sequence_markers()
+
+    def clear_sequence_steps(self):
+        if self.sequence_running or not self.sequence_steps:
+            return
+        if messagebox.askyesno("Limpiar secuencia", "¿Eliminar todos los pasos registrados?", parent=self.root):
+            self.sequence_steps.clear()
+            self.refresh_sequence_tree()
+            self.draw_sequence_markers()
+
+    def draw_sequence_markers(self):
+        if not hasattr(self, "sequence_canvas"):
+            return
+        self.sequence_canvas.delete("sequence_marker")
+        if not self.sequence_display_geometry:
+            return
+        offset_x, offset_y, display_width, display_height = self.sequence_display_geometry
+        tap_number = 0
+        for step in self.sequence_steps:
+            if step.get("type") != "tap":
+                continue
+            tap_number += 1
+            x = offset_x + step["x_ratio"] * display_width
+            y = offset_y + step["y_ratio"] * display_height
+            self.sequence_canvas.create_oval(
+                x - 11, y - 11, x + 11, y + 11,
+                outline="#ff3030", width=2, tags="sequence_marker",
+            )
+            self.sequence_canvas.create_text(
+                x, y, text=str(tap_number), fill="#ff3030",
+                font=("Segoe UI", 8, "bold"), tags="sequence_marker",
+            )
+
+    def save_sequence_file(self):
+        if self.sequence_running or not self.sequence_steps:
+            return messagebox.showwarning("Secuencia", "No hay pasos para guardar.")
+        self.sequence_dir.mkdir(parents=True, exist_ok=True)
+        path = filedialog.asksaveasfilename(
+            parent=self.root,
+            title="Guardar secuencia",
+            initialdir=str(self.sequence_dir),
+            defaultextension=".json",
+            filetypes=[("Secuencia JSON", "*.json")],
+        )
+        if not path:
+            return
+        payload = {
+            "format": "panel-celulares-sequence",
+            "version": 1,
+            "created_at": time.strftime("%Y-%m-%d %H:%M:%S"),
+            "steps": self.sequence_steps,
+        }
+        try:
+            Path(path).write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
+            self.sequence_status_var.set(f"Secuencia guardada: {Path(path).name}")
+        except Exception as error:
+            messagebox.showerror("No se pudo guardar", str(error), parent=self.root)
+
+    def load_sequence_file(self):
+        if self.sequence_running:
+            return
+        self.sequence_dir.mkdir(parents=True, exist_ok=True)
+        path = filedialog.askopenfilename(
+            parent=self.root,
+            title="Cargar secuencia",
+            initialdir=str(self.sequence_dir),
+            filetypes=[("Secuencia JSON", "*.json")],
+        )
+        if not path:
+            return
+        try:
+            payload = json.loads(Path(path).read_text(encoding="utf-8"))
+            if not isinstance(payload, dict) or payload.get("format") != "panel-celulares-sequence" or payload.get("version") != 1:
+                raise ValueError("El archivo no pertenece al formato de secuencias versión 1.")
+            raw_steps = payload.get("steps")
+            if not isinstance(raw_steps, list) or len(raw_steps) > 500:
+                raise ValueError("La lista de pasos no es válida o supera el máximo de 500.")
+            validated = []
+            for raw_step in raw_steps:
+                step = self.validate_sequence_step(raw_step)
+                if not step:
+                    raise ValueError("El archivo contiene un paso no permitido.")
+                validated.append(step)
+            self.sequence_steps = validated
+            self.refresh_sequence_tree(select_index=0 if validated else None)
+            self.draw_sequence_markers()
+            self.sequence_status_var.set(f"Secuencia cargada: {Path(path).name} · {len(validated)} pasos.")
+        except Exception as error:
+            messagebox.showerror("No se pudo cargar", str(error), parent=self.root)
+
+    def start_sequence_execution(self, single_step=False):
+        if self.sequence_running:
+            return
+        if not self.sequence_steps:
+            return messagebox.showwarning("Secuencia", "Registra o carga al menos un paso.")
+        if single_step:
+            index = self.selected_sequence_index()
+            if index is None:
+                return messagebox.showwarning("Secuencia", "Selecciona el paso que deseas ejecutar.")
+            steps = [(index, dict(self.sequence_steps[index]))]
+        else:
+            steps = [(index, dict(step)) for index, step in enumerate(self.sequence_steps)]
+        devices, busy = self.claim_devices(self.get_selected_devices(), "Secuencia de acciones")
+        if not devices:
+            return messagebox.showwarning("Equipos ocupados", "Selecciona teléfonos disponibles para ejecutar la secuencia.")
+        if busy:
+            messagebox.showinfo("Equipos ocupados", "Se omitieron equipos que ya ejecutan otra acción.")
+        previous_tasks = {device: self.device_tasks.get(device) for device in devices}
+        for device in devices:
+            self.set_device_task(device, "Secuencia de acciones")
+        self.sequence_stop_event.clear()
+        self.sequence_running = True
+        self.btn_sequence_step.config(state="disabled")
+        self.btn_sequence_all.config(state="disabled")
+        self.btn_sequence_stop.config(state="normal")
+        self.sequence_status_var.set(f"Ejecutando {len(steps)} paso(s) en {len(devices)} teléfono(s)...")
+        threading.Thread(
+            target=self.sequence_execution_worker,
+            args=(devices, steps, previous_tasks),
+            daemon=True,
+        ).start()
+
+    def sequence_execution_worker(self, devices, indexed_steps, previous_tasks):
+        result = "completada"
+        try:
+            for position, (original_index, step) in enumerate(indexed_steps, start=1):
+                if self.sequence_stop_event.is_set() or self.app_closing.is_set():
+                    result = "detenida"
+                    break
+                action, detail = self.sequence_step_description(step)
+                self.post_ui(
+                    lambda pos=position, total=len(indexed_steps), act=action: self.sequence_status_var.set(
+                        f"Paso {pos} de {total}: {act}."
+                    )
+                )
+                self.log(f"Secuencia · paso {original_index + 1}: {action} · {detail}")
+                if step["type"] == "wait":
+                    if self.wait_or_cancel(step["seconds"], self.sequence_stop_event):
+                        result = "detenida"
+                        break
+                    continue
+                for device in devices:
+                    if self.sequence_stop_event.is_set() or self.app_closing.is_set():
+                        result = "detenida"
+                        break
+                    if step["type"] == "tap":
+                        size = self.get_device_screen_size(device)
+                        if not size:
+                            self.log(f"[{device}] Secuencia: no se pudo leer la resolución; paso omitido.")
+                            continue
+                        x = min(size[0] - 1, max(0, round(step["x_ratio"] * size[0])))
+                        y = min(size[1] - 1, max(0, round(step["y_ratio"] * size[1])))
+                        ok, detail_result = self.run_on_device(
+                            device, ["shell", "input", "tap", str(x), str(y)], timeout=15
+                        )
+                        self.log(
+                            f"[{device}] Secuencia: toque ({x}, {y}) "
+                            + ("ejecutado." if ok else f"falló: {detail_result}")
+                        )
+                    elif step["type"] == "back":
+                        ok, detail_result = self.run_on_device(
+                            device, ["shell", "input", "keyevent", "4"], timeout=15
+                        )
+                        self.log(
+                            f"[{device}] Secuencia: Atrás "
+                            + ("ejecutado." if ok else f"falló: {detail_result}")
+                        )
+                if result == "detenida":
+                    break
+        except Exception as error:
+            result = "con error"
+            self.log(f"Secuencia: error inesperado: {error}")
+        finally:
+            self.post_ui(lambda r=result, devs=list(devices), prev=previous_tasks: self.finish_sequence_execution(r, devs, prev))
+
+    def finish_sequence_execution(self, result, devices, previous_tasks):
+        self.sequence_running = False
+        self.btn_sequence_step.config(state="normal")
+        self.btn_sequence_all.config(state="normal")
+        self.btn_sequence_stop.config(state="disabled")
+        self.sequence_status_var.set(f"Secuencia {result}.")
+        for device in devices:
+            self.restore_device_task(device, "Secuencia de acciones", previous_tasks.get(device))
+            self.release_device(device)
+
+    def stop_sequence_execution(self):
+        if not self.sequence_running:
+            return
+        self.sequence_stop_event.set()
+        self.sequence_status_var.set("Deteniendo secuencia...")
+
     def create_console_widget(self):
         console_frame = ttk.LabelFrame(self.root, text=" Consola de Estado ", padding=10)
         console_frame.pack(fill="both", expand=True, padx=15, pady=10)
@@ -655,6 +1119,7 @@ class ProfessionalPhoneController:
         self.search_stop_event.set()
         self.human_stop_event.set()
         self.report_stop_event.set()
+        self.sequence_stop_event.set()
         for p in list(self.scrcpy_processes.values()):
             try: p.terminate()
             except: pass

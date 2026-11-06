@@ -21,6 +21,37 @@ Ninguno.
 
 ## Cambios completados
 
+### CHG-20261106-1735 — Pestaña inicial de Secuencias de acciones
+
+- Fecha y hora de inicio: 2026-11-06 17:35:00 (America/Mexico_City)
+- Estado: Completado localmente el 2026-11-06 17:44:03 (America/Mexico_City)
+- Tipo: Funcionalidad solicitada por el cliente
+- Autoría: Se conserva la autoría del proyecto original; este trabajo se limita a implementar la solicitud y documentar el cambio.
+- Objetivo: Crear una pestaña independiente para construir, guardar y ejecutar procedimientos sencillos paso a paso, sin modificar el comportamiento de las pestañas existentes.
+- Implementación:
+  - Captura real de la pantalla del teléfono seleccionado dentro del panel.
+  - Registro visual de toques mediante marcadores numerados; cada toque se almacena como proporción de ancho y alto.
+  - Pasos de espera entre 0.1 y 3600 segundos y acción Atrás de Android.
+  - Lista con reordenamiento, eliminación y limpieza de pasos.
+  - Ejecución de un paso seleccionado o de la secuencia completa en los teléfonos disponibles.
+  - Exclusión de dispositivos ocupados, tarea visible por teléfono, log individual y detención mediante evento cancelable.
+  - Guardado y carga JSON versión 1 con límite de 500 pasos y lista cerrada de acciones `tap`, `wait` y `back`.
+  - Carpeta operativa `secuencias` excluida de Git.
+- Límites intencionales: Sin funciones específicas de reportes, sin rotación de IP, sin calentamiento, sin ejecución oculta y sin captura directa de toques físicos.
+- Pruebas realizadas:
+  - Compilación de Python y `git diff --check`: correctos.
+  - Validación de JSON: acepta las tres acciones admitidas y rechaza tipos desconocidos, proporciones fuera de rango y esperas inválidas.
+  - Escalado simulado: un toque grabado al 25% × 50% se convirtió correctamente en `(180, 760)` sobre una pantalla de 720 × 1520.
+  - Secuencia simulada: ejecutó Toque, Espera y Atrás en el orden esperado.
+  - Cancelación simulada durante una espera: no ejecutó el paso posterior y terminó como `detenida`.
+  - Arranque real del panel: proceso responsivo, pestaña visible y controles completos.
+  - Prueba visual real: capturó el teléfono `W555`, mostró una imagen de 720 × 1520 y registró un toque con marcador y coordenadas proporcionales sin enviarlo al dispositivo.
+- Referencia de rollback: commit `586c136` de la rama `integracion`.
+- Rama Git: `integracion`.
+- Hash de `panel.py`: `21716B5CC6E4BD739678C9B118650AE213EFE283767C949279675D6BF9B839ED`.
+- Hash de `LEEME.txt`: `937B5D6308E92639D5C9C231F90B8850B1183057CF94DA9BE8D628067B72E209`.
+- Hash de `.gitignore`: `6F84380EC8166BCD4F8920513EFB58E1BD97065A0ABB6A01DC1D9FD1E9C69EA0`.
+
 ### CHG-20261106-0950 — Casilla Guardar enlace en Búsqueda
 
 - Fecha y hora de inicio: 2026-11-06 09:50:00 (America/Mexico_City)
