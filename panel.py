@@ -63,6 +63,8 @@ except ImportError:
 
 class ProfessionalPhoneController:
     SEQUENCE_ACTIONS = {
+        "Dar clic en la captura": "tap",
+        "Presionar y deslizar": "swipe",
         "Escribir texto": "text",
         "Cargar lista por renglones": "load_list",
         "Siguiente elemento de lista": "next_list",
@@ -124,6 +126,8 @@ class ProfessionalPhoneController:
         self.sequence_capture_size = None
         self.sequence_display_geometry = None
         self.sequence_photo = None
+        self.sequence_record_mode = "tap"
+        self.sequence_swipe_start = None
         self.ocr_warning_shown = False
         self.first_device_scan = True
 
@@ -783,6 +787,38 @@ class ProfessionalPhoneController:
         self.sequence_action_use_list_var = None
         self.sequence_action_min_var = None
         self.sequence_action_max_var = None
+        self.sequence_action_duration_var = None
+
+        if action_type == "tap":
+            ttk.Label(
+                self.sequence_action_fields,
+                text=(
+                    "Captura el teléfono y pulsa Agregar acción; después haz clic sobre la imagen. "
+                    "La cruz numerada y sus coordenadas proporcionales se agregarán a Pasos registrados."
+                ),
+                foreground="#1d5f91",
+            ).pack(anchor="w")
+            return
+
+        if action_type == "swipe":
+            row = ttk.Frame(self.sequence_action_fields)
+            row.pack(fill="x")
+            ttk.Label(
+                row,
+                text="Duración de la presión y el desplazamiento:",
+            ).pack(side="left")
+            self.sequence_action_duration_var = tk.StringVar(value="800")
+            ttk.Entry(row, textvariable=self.sequence_action_duration_var, width=8).pack(side="left", padx=(6, 4))
+            ttk.Label(row, text="milisegundos (100 a 10000)").pack(side="left")
+            ttk.Label(
+                self.sequence_action_fields,
+                text=(
+                    "Pulsa Agregar acción y marca dos puntos sobre la captura: primero el inicio sostenido "
+                    "y después el destino del deslizamiento."
+                ),
+                foreground="#1d5f91",
+            ).pack(anchor="w", pady=(4, 0))
+            return
 
         if action_type == "text":
             row = ttk.Frame(self.sequence_action_fields)
@@ -894,6 +930,48 @@ class ProfessionalPhoneController:
         action_type = self.SEQUENCE_ACTIONS.get(self.sequence_action_var.get(), "text")
         step = {"type": action_type}
 
+        if action_type == "tap":
+            if not self.sequence_capture_size or not self.sequence_display_geometry:
+                return messagebox.showwarning(
+                    "Captura requerida",
+                    "Primero selecciona un teléfono y pulsa Capturar teléfono seleccionado.",
+                    parent=self.root,
+                )
+            self.sequence_status_var.set(
+                "Dar clic está activo: pulsa el punto deseado sobre la captura para registrar la cruz y sus coordenadas."
+            )
+            self.sequence_record_mode = "tap"
+            self.sequence_swipe_start = None
+            self.draw_sequence_markers()
+            return
+        if action_type == "swipe":
+            if not self.sequence_capture_size or not self.sequence_display_geometry:
+                return messagebox.showwarning(
+                    "Captura requerida",
+                    "Primero selecciona un teléfono y pulsa Capturar teléfono seleccionado.",
+                    parent=self.root,
+                )
+            try:
+                duration_ms = int(self.sequence_action_duration_var.get())
+            except (AttributeError, TypeError, ValueError):
+                return messagebox.showwarning(
+                    "Duración no válida",
+                    "Escribe la duración sostenida en milisegundos.",
+                    parent=self.root,
+                )
+            if not 100 <= duration_ms <= 10000:
+                return messagebox.showwarning(
+                    "Duración no válida",
+                    "La duración debe estar entre 100 y 10000 milisegundos.",
+                    parent=self.root,
+                )
+            self.sequence_record_mode = "swipe"
+            self.sequence_swipe_start = {"duration_ms": duration_ms}
+            self.draw_sequence_markers()
+            self.sequence_status_var.set(
+                "Deslizamiento activo: marca primero dónde se mantendrá presionado y después el punto de destino."
+            )
+            return
         if action_type == "text":
             use_list = bool(self.sequence_action_use_list_var.get())
             text_value = self.sequence_action_text_widget.get("1.0", tk.END).rstrip("\r\n")
@@ -976,6 +1054,7 @@ class ProfessionalPhoneController:
         self.sequence_canvas.create_image(offset_x, offset_y, anchor="nw", image=self.sequence_photo)
         self.sequence_capture_size = (source_width, source_height)
         self.sequence_display_geometry = (offset_x, offset_y, display_width, display_height)
+        self.sequence_swipe_start = None
         self.draw_sequence_markers()
         self.sequence_status_var.set(
             f"Captura de {self.display_device_name(device)}: {source_width} × {source_height}. Pulsa sobre la imagen para agregar un toque."
@@ -991,6 +1070,37 @@ class ProfessionalPhoneController:
         source_width, source_height = self.sequence_capture_size
         x_ratio = min(1.0, max(0.0, local_x / display_width))
         y_ratio = min(1.0, max(0.0, local_y / display_height))
+        if self.sequence_record_mode == "swipe":
+            pending = self.sequence_swipe_start or {"duration_ms": 800}
+            if "x_ratio" not in pending:
+                pending.update({
+                    "x_ratio": round(x_ratio, 6),
+                    "y_ratio": round(y_ratio, 6),
+                    "recorded_width": source_width,
+                    "recorded_height": source_height,
+                })
+                self.sequence_swipe_start = pending
+                self.draw_sequence_markers()
+                self.sequence_status_var.set(
+                    f"Inicio sostenido: X {x_ratio * 100:.1f}% · Y {y_ratio * 100:.1f}%. Ahora marca el destino."
+                )
+                return
+            self.add_sequence_step({
+                "type": "swipe",
+                "start_x_ratio": pending["x_ratio"],
+                "start_y_ratio": pending["y_ratio"],
+                "end_x_ratio": round(x_ratio, 6),
+                "end_y_ratio": round(y_ratio, 6),
+                "duration_ms": pending["duration_ms"],
+                "recorded_width": source_width,
+                "recorded_height": source_height,
+            })
+            self.sequence_swipe_start = {"duration_ms": pending["duration_ms"]}
+            self.sequence_status_var.set(
+                f"Deslizamiento agregado: X {pending['x_ratio'] * 100:.1f}%, Y {pending['y_ratio'] * 100:.1f}% "
+                f"→ X {x_ratio * 100:.1f}%, Y {y_ratio * 100:.1f}%."
+            )
+            return
         self.add_sequence_step({
             "type": "tap",
             "x_ratio": round(x_ratio, 6),
@@ -998,6 +1108,9 @@ class ProfessionalPhoneController:
             "recorded_width": source_width,
             "recorded_height": source_height,
         })
+        self.sequence_status_var.set(
+            f"Dar clic agregado: X {x_ratio * 100:.1f}% · Y {y_ratio * 100:.1f}%."
+        )
 
     def add_sequence_step(self, step):
         if self.sequence_running:
@@ -1025,6 +1138,29 @@ class ProfessionalPhoneController:
                 "type": "tap",
                 "x_ratio": round(x_ratio, 6),
                 "y_ratio": round(y_ratio, 6),
+                "recorded_width": max(1, int(step.get("recorded_width", 1))),
+                "recorded_height": max(1, int(step.get("recorded_height", 1))),
+            }
+        if step_type == "swipe":
+            try:
+                start_x = float(step["start_x_ratio"])
+                start_y = float(step["start_y_ratio"])
+                end_x = float(step["end_x_ratio"])
+                end_y = float(step["end_y_ratio"])
+                duration_ms = int(step["duration_ms"])
+            except (KeyError, TypeError, ValueError):
+                return None
+            if not all(0.0 <= value <= 1.0 for value in (start_x, start_y, end_x, end_y)):
+                return None
+            if not 100 <= duration_ms <= 10000:
+                return None
+            return {
+                "type": "swipe",
+                "start_x_ratio": round(start_x, 6),
+                "start_y_ratio": round(start_y, 6),
+                "end_x_ratio": round(end_x, 6),
+                "end_y_ratio": round(end_y, 6),
+                "duration_ms": duration_ms,
                 "recorded_width": max(1, int(step.get("recorded_width", 1))),
                 "recorded_height": max(1, int(step.get("recorded_height", 1))),
             }
@@ -1115,6 +1251,12 @@ class ProfessionalPhoneController:
     def sequence_step_description(self, step):
         if step["type"] == "tap":
             return "Toque", f"X {step['x_ratio'] * 100:.1f}% · Y {step['y_ratio'] * 100:.1f}%"
+        if step["type"] == "swipe":
+            return (
+                "Presionar y deslizar",
+                f"X {step['start_x_ratio'] * 100:.1f}%, Y {step['start_y_ratio'] * 100:.1f}% → "
+                f"X {step['end_x_ratio'] * 100:.1f}%, Y {step['end_y_ratio'] * 100:.1f}% · {step['duration_ms']} ms",
+            )
         if step["type"] == "wait":
             minimum = step["min_seconds"]
             maximum = step["max_seconds"]
@@ -1193,19 +1335,52 @@ class ProfessionalPhoneController:
         if not self.sequence_display_geometry:
             return
         offset_x, offset_y, display_width, display_height = self.sequence_display_geometry
-        tap_number = 0
-        for step in self.sequence_steps:
-            if step.get("type") != "tap":
+        for step_number, step in enumerate(self.sequence_steps, start=1):
+            if step.get("type") == "tap":
+                x = offset_x + step["x_ratio"] * display_width
+                y = offset_y + step["y_ratio"] * display_height
+                self.sequence_canvas.create_line(
+                    x - 12, y, x + 12, y, fill="#ff3030", width=2, tags="sequence_marker",
+                )
+                self.sequence_canvas.create_line(
+                    x, y - 12, x, y + 12, fill="#ff3030", width=2, tags="sequence_marker",
+                )
+                self.sequence_canvas.create_text(
+                    x + 16, y - 12, text=str(step_number), fill="#ff3030",
+                    font=("Segoe UI", 8, "bold"), tags="sequence_marker",
+                )
                 continue
-            tap_number += 1
-            x = offset_x + step["x_ratio"] * display_width
-            y = offset_y + step["y_ratio"] * display_height
+            if step.get("type") != "swipe":
+                continue
+            start_x = offset_x + step["start_x_ratio"] * display_width
+            start_y = offset_y + step["start_y_ratio"] * display_height
+            end_x = offset_x + step["end_x_ratio"] * display_width
+            end_y = offset_y + step["end_y_ratio"] * display_height
+            self.sequence_canvas.create_line(
+                start_x, start_y, end_x, end_y, fill="#ff8c00", width=3,
+                arrow=tk.LAST, tags="sequence_marker",
+            )
+            for x, y, suffix in ((start_x, start_y, "I"), (end_x, end_y, "F")):
+                self.sequence_canvas.create_line(
+                    x - 10, y, x + 10, y, fill="#ff8c00", width=2, tags="sequence_marker",
+                )
+                self.sequence_canvas.create_line(
+                    x, y - 10, x, y + 10, fill="#ff8c00", width=2, tags="sequence_marker",
+                )
+                self.sequence_canvas.create_text(
+                    x + 15, y - 11, text=f"{step_number}{suffix}", fill="#ff8c00",
+                    font=("Segoe UI", 8, "bold"), tags="sequence_marker",
+                )
+        pending = self.sequence_swipe_start or {}
+        if self.sequence_record_mode == "swipe" and "x_ratio" in pending:
+            x = offset_x + pending["x_ratio"] * display_width
+            y = offset_y + pending["y_ratio"] * display_height
             self.sequence_canvas.create_oval(
                 x - 11, y - 11, x + 11, y + 11,
-                outline="#ff3030", width=2, tags="sequence_marker",
+                outline="#ffd400", width=2, tags="sequence_marker",
             )
             self.sequence_canvas.create_text(
-                x, y, text=str(tap_number), fill="#ff3030",
+                x, y, text="I", fill="#ffd400",
                 font=("Segoe UI", 8, "bold"), tags="sequence_marker",
             )
 
@@ -1448,6 +1623,28 @@ class ProfessionalPhoneController:
                         )
                         self.log(
                             f"[{device}] Secuencia: toque ({x}, {y}) "
+                            + ("ejecutado." if ok else f"falló: {detail_result}")
+                        )
+                    elif step["type"] == "swipe":
+                        size = self.get_device_screen_size(device)
+                        if not size:
+                            self.log(f"[{device}] Secuencia: no se pudo leer la resolución; deslizamiento omitido.")
+                            continue
+                        start_x = min(size[0] - 1, max(0, round(step["start_x_ratio"] * size[0])))
+                        start_y = min(size[1] - 1, max(0, round(step["start_y_ratio"] * size[1])))
+                        end_x = min(size[0] - 1, max(0, round(step["end_x_ratio"] * size[0])))
+                        end_y = min(size[1] - 1, max(0, round(step["end_y_ratio"] * size[1])))
+                        ok, detail_result = self.run_on_device(
+                            device,
+                            [
+                                "shell", "input", "touchscreen", "swipe",
+                                str(start_x), str(start_y), str(end_x), str(end_y), str(step["duration_ms"]),
+                            ],
+                            timeout=15,
+                        )
+                        self.log(
+                            f"[{device}] Secuencia: presión y deslizamiento "
+                            f"({start_x}, {start_y}) → ({end_x}, {end_y}) "
                             + ("ejecutado." if ok else f"falló: {detail_result}")
                         )
                     elif step["type"] == "back":

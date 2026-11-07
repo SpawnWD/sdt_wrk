@@ -21,6 +21,31 @@ Ninguno.
 
 ## Cambios completados
 
+### CHG-20261106-1822 — Restaurar Dar clic y agregar gesto sostenido
+
+- Fecha y hora de inicio: 2026-11-06 18:22:13 (America/Mexico_City)
+- Estado: Completado localmente el 2026-11-06 18:29:00 (America/Mexico_City)
+- Tipo: Corrección funcional solicitada por el cliente
+- Autoría: Se conserva la autoría del proyecto original; sólo se restituye la función solicitada.
+- Problema: El toque proporcional continuó existiendo al pulsar la captura, pero la ampliación del constructor omitió la acción `Dar clic` en el catálogo visible.
+- Objetivo: Volver a mostrar `Dar clic` en la lista de acciones y conservar exactamente el registro mediante cruz numerada y coordenadas proporcionales sobre la captura del teléfono.
+- Ampliación solicitada: Agregar `Presionar y deslizar`; el primer punto marca dónde se mantiene presionada la pantalla y el segundo dónde termina el desplazamiento, ambos con coordenadas proporcionales.
+- Alcance: `panel.py`, `LEEME.txt` y esta bitácora; no se modifican las demás acciones ni pestañas.
+- Referencia de rollback: commit `1bb641b` de la rama `integracion`.
+- Rama Git: `integracion`.
+- Implementación:
+  - `Dar clic en la captura` volvió al catálogo; `Agregar acción` activa el registro y un clic sobre la imagen crea la cruz roja numerada con X/Y proporcionales.
+  - Se agregó `Presionar y deslizar` con duración configurable entre 100 y 10000 ms.
+  - El primer punto marca el inicio sostenido, el segundo marca el destino y una flecha naranja muestra la dirección.
+  - La ejecución convierte ambos puntos proporcionales a la resolución real de cada teléfono y usa el gesto Android `input touchscreen swipe` con la duración guardada.
+  - La validación, guardado y carga JSON versión 1 aceptan ambos tipos de acción sin afectar secuencias anteriores.
+- Pruebas:
+  - `python -m py_compile panel.py`: correcto.
+  - `git diff --check`: correcto.
+  - Catálogo `tap`/`swipe`, validación de dos puntos, coordenadas proporcionales y comando sostenido: correctos mediante simulación local.
+  - No se ejecutó el toque ni el deslizamiento sobre el teléfono durante la prueba.
+- Commit resultante: El commit de la rama `integracion` que contiene esta entrada.
+
 ### CHG-20261106-1805 — Constructor ampliado de procesos y acciones
 
 - Fecha y hora de inicio: 2026-11-06 18:05:30 (America/Mexico_City)
