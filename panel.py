@@ -62,6 +62,16 @@ except ImportError:
 
 
 class ProfessionalPhoneController:
+    SEQUENCE_ACTIONS = {
+        "Escribir texto": "text",
+        "Cargar lista por renglones": "load_list",
+        "Siguiente elemento de lista": "next_list",
+        "Abrir liga / link": "open_url",
+        "Calentamiento orgánico": "warmup",
+        "Espera aleatoria": "wait",
+        "Atrás": "back",
+    }
+
     def __init__(self, root):
         self.root = root
         self.root.title("Panel de Control Multi-Dispositivo - FB Lite & Modo Agencia")
@@ -655,10 +665,38 @@ class ProfessionalPhoneController:
         toolbar = ttk.Frame(sequence_frame)
         toolbar.pack(fill="x", pady=(0, 7))
         ttk.Button(toolbar, text="Capturar teléfono seleccionado", command=self.capture_sequence_screen).pack(side="left")
-        ttk.Button(toolbar, text="Agregar espera", command=self.add_sequence_wait).pack(side="left", padx=(7, 0))
-        ttk.Button(toolbar, text="Agregar Atrás", command=lambda: self.add_sequence_step({"type": "back"})).pack(side="left", padx=(7, 0))
         ttk.Button(toolbar, text="Guardar", command=self.save_sequence_file).pack(side="right", padx=(7, 0))
         ttk.Button(toolbar, text="Cargar", command=self.load_sequence_file).pack(side="right")
+
+        action_builder = ttk.LabelFrame(sequence_frame, text=" Agregar una acción al proceso ", padding=7)
+        action_builder.pack(fill="x", pady=(0, 7))
+        selector_row = ttk.Frame(action_builder)
+        selector_row.pack(fill="x")
+        ttk.Label(selector_row, text="Acción:", font=("Segoe UI", 9, "bold")).pack(side="left")
+        self.sequence_action_var = tk.StringVar(value="Escribir texto")
+        self.sequence_action_combo = ttk.Combobox(
+            selector_row,
+            textvariable=self.sequence_action_var,
+            values=list(self.SEQUENCE_ACTIONS),
+            state="readonly",
+            width=29,
+        )
+        self.sequence_action_combo.pack(side="left", padx=(6, 8))
+        self.sequence_action_combo.bind("<<ComboboxSelected>>", lambda _event: self.render_sequence_action_fields())
+        ttk.Button(
+            selector_row,
+            text="Agregar acción",
+            command=self.add_configured_sequence_action,
+            style="Primary.TButton",
+        ).pack(side="left")
+        ttk.Label(
+            selector_row,
+            text="Los valores iniciales reutilizan los tiempos ya establecidos en el panel.",
+            foreground="#1d5f91",
+        ).pack(side="left", padx=(12, 0))
+        self.sequence_action_fields = ttk.Frame(action_builder)
+        self.sequence_action_fields.pack(fill="x", pady=(6, 0))
+        self.render_sequence_action_fields()
 
         content = ttk.Panedwindow(sequence_frame, orient="horizontal")
         content.pack(fill="both", expand=True)
@@ -670,7 +708,7 @@ class ProfessionalPhoneController:
         self.sequence_canvas = tk.Canvas(
             preview_frame,
             width=430,
-            height=540,
+            height=350,
             bg="#202020",
             highlightthickness=1,
             highlightbackground="#606060",
@@ -683,7 +721,7 @@ class ProfessionalPhoneController:
             steps_frame,
             columns=("step", "type", "detail"),
             show="headings",
-            height=18,
+            height=11,
             selectmode="browse",
         )
         self.sequence_tree.heading("step", text="#")
@@ -733,6 +771,171 @@ class ProfessionalPhoneController:
             font=("Segoe UI", 9, "bold"),
         ).pack(fill="x", pady=(2, 0))
 
+    def render_sequence_action_fields(self):
+        if not hasattr(self, "sequence_action_fields"):
+            return
+        for child in self.sequence_action_fields.winfo_children():
+            child.destroy()
+        action_type = self.SEQUENCE_ACTIONS.get(self.sequence_action_var.get(), "text")
+        self.sequence_action_text_widget = None
+        self.sequence_action_list_widget = None
+        self.sequence_action_url_var = None
+        self.sequence_action_use_list_var = None
+        self.sequence_action_min_var = None
+        self.sequence_action_max_var = None
+
+        if action_type == "text":
+            row = ttk.Frame(self.sequence_action_fields)
+            row.pack(fill="x")
+            self.sequence_action_use_list_var = tk.BooleanVar(value=False)
+            ttk.Checkbutton(
+                row,
+                text="Usar el elemento actual de la lista",
+                variable=self.sequence_action_use_list_var,
+            ).pack(side="left")
+            ttk.Label(row, text="Intervalo entre letras — mínimo:").pack(side="left", padx=(18, 4))
+            self.sequence_action_min_var = tk.StringVar(value="0.05")
+            self.sequence_action_max_var = tk.StringVar(value="0.15")
+            ttk.Entry(row, textvariable=self.sequence_action_min_var, width=7).pack(side="left")
+            ttk.Label(row, text="máximo:").pack(side="left", padx=(7, 4))
+            ttk.Entry(row, textvariable=self.sequence_action_max_var, width=7).pack(side="left")
+            ttk.Label(row, text="segundos").pack(side="left", padx=(4, 0))
+            self.sequence_action_text_widget = scrolledtext.ScrolledText(
+                self.sequence_action_fields, height=2, font=("Segoe UI", 9)
+            )
+            self.sequence_action_text_widget.pack(fill="x", pady=(5, 0))
+            return
+
+        if action_type == "load_list":
+            ttk.Label(
+                self.sequence_action_fields,
+                text="Pega la lista: cada renglón será un elemento independiente del proceso.",
+            ).pack(anchor="w")
+            self.sequence_action_list_widget = scrolledtext.ScrolledText(
+                self.sequence_action_fields, height=3, font=("Segoe UI", 9)
+            )
+            self.sequence_action_list_widget.pack(fill="x", pady=(4, 0))
+            return
+
+        if action_type == "next_list":
+            ttk.Label(
+                self.sequence_action_fields,
+                text="Avanza al siguiente renglón de la lista cargada. Si ya terminó, el proceso lo informa sin reiniciar la lista.",
+                foreground="#1d5f91",
+            ).pack(anchor="w")
+            return
+
+        if action_type == "open_url":
+            row = ttk.Frame(self.sequence_action_fields)
+            row.pack(fill="x")
+            self.sequence_action_use_list_var = tk.BooleanVar(value=False)
+            ttk.Checkbutton(
+                row,
+                text="Usar el elemento actual de la lista como URL",
+                variable=self.sequence_action_use_list_var,
+            ).pack(side="left")
+            ttk.Label(row, text="Liga / link:").pack(side="left", padx=(18, 4))
+            self.sequence_action_url_var = tk.StringVar()
+            ttk.Entry(row, textvariable=self.sequence_action_url_var).pack(side="left", fill="x", expand=True)
+            return
+
+        if action_type in {"warmup", "wait"}:
+            row = ttk.Frame(self.sequence_action_fields)
+            row.pack(fill="x")
+            if action_type == "warmup":
+                label = "Duración del calentamiento — mínimo:"
+                minimum_default, maximum_default = "5", "15"
+            else:
+                label = "Tiempo de espera — mínimo:"
+                minimum_default, maximum_default = "3", "8"
+            ttk.Label(row, text=label).pack(side="left")
+            self.sequence_action_min_var = tk.StringVar(value=minimum_default)
+            self.sequence_action_max_var = tk.StringVar(value=maximum_default)
+            ttk.Entry(row, textvariable=self.sequence_action_min_var, width=8).pack(side="left", padx=(5, 0))
+            ttk.Label(row, text="máximo:").pack(side="left", padx=(8, 4))
+            ttk.Entry(row, textvariable=self.sequence_action_max_var, width=8).pack(side="left")
+            ttk.Label(row, text="segundos").pack(side="left", padx=(4, 0))
+            if action_type == "warmup":
+                ttk.Label(
+                    row,
+                    text="Reutiliza el calentamiento orgánico actual con sus pausas internas.",
+                    foreground="#1d5f91",
+                ).pack(side="left", padx=(12, 0))
+            return
+
+        ttk.Label(
+            self.sequence_action_fields,
+            text="Registra el botón Atrás de Android.",
+            foreground="#1d5f91",
+        ).pack(anchor="w")
+
+    def read_sequence_interval(self, minimum_var, maximum_var, minimum_allowed, maximum_allowed, label):
+        try:
+            minimum = float(minimum_var.get())
+            maximum = float(maximum_var.get())
+        except (AttributeError, TypeError, ValueError):
+            messagebox.showwarning("Intervalo no válido", f"{label}: escribe mínimo y máximo numéricos.", parent=self.root)
+            return None
+        if not minimum_allowed <= minimum <= maximum_allowed or not minimum_allowed <= maximum <= maximum_allowed:
+            messagebox.showwarning(
+                "Intervalo no válido",
+                f"{label}: ambos valores deben estar entre {minimum_allowed:g} y {maximum_allowed:g}.",
+                parent=self.root,
+            )
+            return None
+        if minimum > maximum:
+            messagebox.showwarning("Intervalo no válido", f"{label}: el mínimo no puede superar al máximo.", parent=self.root)
+            return None
+        return round(minimum, 3), round(maximum, 3)
+
+    def add_configured_sequence_action(self):
+        if self.sequence_running:
+            return
+        action_type = self.SEQUENCE_ACTIONS.get(self.sequence_action_var.get(), "text")
+        step = {"type": action_type}
+
+        if action_type == "text":
+            use_list = bool(self.sequence_action_use_list_var.get())
+            text_value = self.sequence_action_text_widget.get("1.0", tk.END).rstrip("\r\n")
+            if not use_list and not text_value:
+                return messagebox.showwarning("Texto requerido", "Escribe el texto o activa el elemento actual de la lista.")
+            interval = self.read_sequence_interval(
+                self.sequence_action_min_var, self.sequence_action_max_var, 0.01, 10.0, "Intervalo entre letras"
+            )
+            if not interval:
+                return
+            step.update({
+                "source": "list" if use_list else "literal",
+                "text": "" if use_list else text_value,
+                "char_min_seconds": interval[0],
+                "char_max_seconds": interval[1],
+            })
+        elif action_type == "load_list":
+            raw_value = self.sequence_action_list_widget.get("1.0", tk.END)
+            items = [line.strip() for line in raw_value.splitlines() if line.strip()]
+            if not items:
+                return messagebox.showwarning("Lista vacía", "Agrega al menos un renglón a la lista.")
+            step["items"] = items
+        elif action_type == "open_url":
+            use_list = bool(self.sequence_action_use_list_var.get())
+            url_value = self.sequence_action_url_var.get().strip()
+            if not use_list and not url_value:
+                return messagebox.showwarning("URL requerida", "Escribe una liga o activa el elemento actual de la lista.")
+            step.update({"source": "list" if use_list else "literal", "url": "" if use_list else url_value})
+        elif action_type in {"warmup", "wait"}:
+            minimum_allowed = 1.0 if action_type == "warmup" else 0.1
+            interval = self.read_sequence_interval(
+                self.sequence_action_min_var,
+                self.sequence_action_max_var,
+                minimum_allowed,
+                3600.0,
+                "Calentamiento" if action_type == "warmup" else "Espera",
+            )
+            if not interval:
+                return
+            step.update({"min_seconds": interval[0], "max_seconds": interval[1]})
+        self.add_sequence_step(step)
+
     def capture_sequence_screen(self):
         if self.sequence_running:
             return messagebox.showwarning("Secuencia activa", "Detén la ejecución antes de capturar otra pantalla.")
@@ -757,7 +960,7 @@ class ProfessionalPhoneController:
             return
         source_height, source_width = screen.shape[:2]
         canvas_width = max(320, self.sequence_canvas.winfo_width())
-        canvas_height = max(420, self.sequence_canvas.winfo_height())
+        canvas_height = max(300, self.sequence_canvas.winfo_height())
         scale = min(canvas_width / source_width, canvas_height / source_height)
         display_width = max(1, int(source_width * scale))
         display_height = max(1, int(source_height * scale))
@@ -796,20 +999,6 @@ class ProfessionalPhoneController:
             "recorded_height": source_height,
         })
 
-    def add_sequence_wait(self):
-        if self.sequence_running:
-            return
-        seconds = simpledialog.askfloat(
-            "Agregar espera",
-            "Segundos de espera (0.1 a 3600):",
-            minvalue=0.1,
-            maxvalue=3600.0,
-            initialvalue=1.0,
-            parent=self.root,
-        )
-        if seconds is not None:
-            self.add_sequence_step({"type": "wait", "seconds": round(float(seconds), 3)})
-
     def add_sequence_step(self, step):
         if self.sequence_running:
             return
@@ -841,12 +1030,84 @@ class ProfessionalPhoneController:
             }
         if step_type == "wait":
             try:
-                seconds = float(step["seconds"])
+                if "min_seconds" in step or "max_seconds" in step:
+                    minimum = float(step["min_seconds"])
+                    maximum = float(step["max_seconds"])
+                else:
+                    # Compatibilidad con los JSON versión 1 de espera fija.
+                    minimum = maximum = float(step["seconds"])
             except (KeyError, TypeError, ValueError):
                 return None
-            if not 0.1 <= seconds <= 3600.0:
+            if not 0.1 <= minimum <= 3600.0 or not 0.1 <= maximum <= 3600.0 or minimum > maximum:
                 return None
-            return {"type": "wait", "seconds": round(seconds, 3)}
+            return {
+                "type": "wait",
+                "min_seconds": round(minimum, 3),
+                "max_seconds": round(maximum, 3),
+            }
+        if step_type == "warmup":
+            try:
+                minimum = float(step["min_seconds"])
+                maximum = float(step["max_seconds"])
+            except (KeyError, TypeError, ValueError):
+                return None
+            if not 1.0 <= minimum <= 3600.0 or not 1.0 <= maximum <= 3600.0 or minimum > maximum:
+                return None
+            return {
+                "type": "warmup",
+                "min_seconds": round(minimum, 3),
+                "max_seconds": round(maximum, 3),
+            }
+        if step_type == "load_list":
+            items = step.get("items")
+            if not isinstance(items, list) or not 1 <= len(items) <= 1000:
+                return None
+            cleaned = []
+            for item in items:
+                if not isinstance(item, str):
+                    return None
+                value = item.strip()
+                if not value or len(value) > 10000:
+                    return None
+                cleaned.append(value)
+            return {"type": "load_list", "items": cleaned}
+        if step_type == "next_list":
+            return {"type": "next_list"}
+        if step_type == "text":
+            source = str(step.get("source", "literal")).strip().casefold()
+            text_value = str(step.get("text", ""))
+            try:
+                minimum = float(step["char_min_seconds"])
+                maximum = float(step["char_max_seconds"])
+            except (KeyError, TypeError, ValueError):
+                return None
+            if source not in {"literal", "list"}:
+                return None
+            if source == "literal" and (not text_value or len(text_value) > 20000):
+                return None
+            if source == "list":
+                text_value = ""
+            if not 0.01 <= minimum <= 10.0 or not 0.01 <= maximum <= 10.0 or minimum > maximum:
+                return None
+            return {
+                "type": "text",
+                "source": source,
+                "text": text_value,
+                "char_min_seconds": round(minimum, 3),
+                "char_max_seconds": round(maximum, 3),
+            }
+        if step_type == "open_url":
+            source = str(step.get("source", "literal")).strip().casefold()
+            url_value = str(step.get("url", "")).strip()
+            if source not in {"literal", "list"}:
+                return None
+            if source == "literal":
+                parsed = urlparse(url_value)
+                if len(url_value) > 2048 or parsed.scheme not in {"http", "https"} or not parsed.hostname:
+                    return None
+            else:
+                url_value = ""
+            return {"type": "open_url", "source": source, "url": url_value}
         if step_type == "back":
             return {"type": "back"}
         return None
@@ -855,7 +1116,23 @@ class ProfessionalPhoneController:
         if step["type"] == "tap":
             return "Toque", f"X {step['x_ratio'] * 100:.1f}% · Y {step['y_ratio'] * 100:.1f}%"
         if step["type"] == "wait":
-            return "Espera", f"{step['seconds']:g} segundos"
+            minimum = step["min_seconds"]
+            maximum = step["max_seconds"]
+            if minimum == maximum:
+                return "Espera", f"{minimum:g} segundos (fija)"
+            return "Espera", f"Aleatoria: {minimum:g} a {maximum:g} segundos"
+        if step["type"] == "warmup":
+            return "Calentamiento", f"Orgánico: {step['min_seconds']:g} a {step['max_seconds']:g} segundos"
+        if step["type"] == "load_list":
+            return "Cargar lista", f"{len(step['items'])} renglones"
+        if step["type"] == "next_list":
+            return "Siguiente", "Avanzar un renglón de la lista"
+        if step["type"] == "text":
+            source = "elemento de lista" if step["source"] == "list" else f"texto: {step['text'][:45]}"
+            return "Escribir", f"{source} · {step['char_min_seconds']:g}–{step['char_max_seconds']:g} s/letra"
+        if step["type"] == "open_url":
+            source = "elemento de lista" if step["source"] == "list" else step["url"][:55]
+            return "Abrir URL", source
         return "Atrás", "Botón Atrás de Android"
 
     def refresh_sequence_tree(self, select_index=None):
@@ -1021,8 +1298,93 @@ class ProfessionalPhoneController:
             daemon=True,
         ).start()
 
+    def sequence_list_value(self, list_context, device):
+        context = list_context.get(device) or {}
+        items = context.get("items") or []
+        index = context.get("index", 0)
+        if not 0 <= index < len(items):
+            return None
+        return items[index]
+
+    def open_url_on_device(self, device, url):
+        """Reutiliza únicamente la apertura de liga empleada por Interacciones."""
+        value = str(url or "").strip()
+        parsed = urlparse(value)
+        if len(value) > 2048 or parsed.scheme not in {"http", "https"} or not parsed.hostname:
+            self.log(f"[{device}] Secuencia: la liga no es un URL HTTP/HTTPS válido; paso omitido.")
+            return False
+        ok, detail = self.run_on_device(
+            device,
+            ["shell", "am", "start", "-a", "android.intent.action.VIEW", "-d", value, "com.facebook.lite"],
+            timeout=20,
+        )
+        self.log(f"[{device}] Secuencia: liga abierta." if ok else f"[{device}] Secuencia: no se pudo abrir la liga: {detail}")
+        return ok
+
+    def inject_text_with_interval(self, device, text, minimum, maximum, stop_event):
+        """Escribe carácter por carácter y permite cancelar entre cada entrada."""
+        if not text:
+            self.log(f"[{device}] Secuencia: el texto está vacío; paso omitido.")
+            return "failed"
+        needs_unicode = any(ord(character) > 127 for character in text)
+        previous_ime = None
+        adb_ime = None
+        if needs_unicode:
+            ok, ime_list = self.run_on_device(device, ["shell", "ime", "list", "-s"], timeout=15)
+            if not ok:
+                self.log(f"[{device}] Secuencia: no se pudo consultar el teclado Android: {ime_list}")
+                return "failed"
+            adb_ime = next(
+                (line.strip() for line in ime_list.splitlines() if "com.android.adbkeyboard" in line.casefold()),
+                None,
+            )
+            if not adb_ime:
+                self.log(f"[{device}] Secuencia: ADB Keyboard es necesario para escribir Unicode letra por letra.")
+                return "failed"
+            ok, current_ime = self.run_on_device(
+                device, ["shell", "settings", "get", "secure", "default_input_method"], timeout=15
+            )
+            if not ok:
+                self.log(f"[{device}] Secuencia: no se pudo leer el teclado actual: {current_ime}")
+                return "failed"
+            previous_ime = current_ime.strip()
+            ok, detail = self.run_on_device(device, ["shell", "ime", "set", adb_ime], timeout=15)
+            if not ok:
+                self.log(f"[{device}] Secuencia: no se pudo activar ADB Keyboard: {detail}")
+                return "failed"
+        try:
+            for index, character in enumerate(text):
+                if self.app_closing.is_set() or stop_event.is_set():
+                    return "cancelled"
+                if character in {"\r", "\n"}:
+                    if character == "\r" and index + 1 < len(text) and text[index + 1] == "\n":
+                        continue
+                    ok, detail = self.run_on_device(device, ["shell", "input", "keyevent", "66"], timeout=15)
+                elif needs_unicode:
+                    payload = base64.b64encode(character.encode("utf-8")).decode("ascii")
+                    ok, detail = self.run_on_device(
+                        device, ["shell", "am", "broadcast", "-a", "ADB_INPUT_B64", "--es", "msg", payload], timeout=15
+                    )
+                else:
+                    escaped = character.replace("\\", "\\\\").replace("%", "\\%").replace(" ", "%s")
+                    if character in ('"', "'", "&", "<", ">", ";", "|", "(", ")", "$", "`", "!", "*", "?", "[", "]", "{", "}"):
+                        escaped = "\\" + escaped
+                    ok, detail = self.run_on_device(device, ["shell", "input", "text", escaped], timeout=15)
+                if not ok:
+                    self.log(f"[{device}] Secuencia: falló la escritura: {detail}")
+                    return "failed"
+                if index < len(text) - 1:
+                    if self.wait_or_cancel(random.uniform(minimum, maximum), stop_event):
+                        return "cancelled"
+            self.log(f"[{device}] Secuencia: texto escrito ({len(text)} caracteres).")
+            return "sent"
+        finally:
+            if needs_unicode and previous_ime and previous_ime != "null":
+                self.run_on_device(device, ["shell", "ime", "set", previous_ime], timeout=15)
+
     def sequence_execution_worker(self, devices, indexed_steps, previous_tasks):
         result = "completada"
+        list_context = {device: {"items": [], "index": 0} for device in devices}
         try:
             for position, (original_index, step) in enumerate(indexed_steps, start=1):
                 if self.sequence_stop_event.is_set() or self.app_closing.is_set():
@@ -1035,8 +1397,38 @@ class ProfessionalPhoneController:
                     )
                 )
                 self.log(f"Secuencia · paso {original_index + 1}: {action} · {detail}")
+                if step["type"] == "load_list":
+                    for device in devices:
+                        list_context[device] = {"items": list(step["items"]), "index": 0}
+                    self.log(f"Secuencia: lista cargada con {len(step['items'])} renglones; elemento actual 1.")
+                    continue
+                if step["type"] == "next_list":
+                    for device in devices:
+                        context = list_context[device]
+                        if not context["items"]:
+                            self.log(f"[{device}] Secuencia: no hay una lista cargada; no se avanzó.")
+                        elif context["index"] + 1 < len(context["items"]):
+                            context["index"] += 1
+                            self.log(
+                                f"[{device}] Secuencia: lista avanzada al elemento "
+                                f"{context['index'] + 1} de {len(context['items'])}."
+                            )
+                        else:
+                            context["index"] = len(context["items"])
+                            self.log(f"[{device}] Secuencia: se alcanzó el final de la lista.")
+                    continue
                 if step["type"] == "wait":
-                    if self.wait_or_cancel(step["seconds"], self.sequence_stop_event):
+                    chosen_seconds = random.uniform(step["min_seconds"], step["max_seconds"])
+                    self.log(
+                        f"Secuencia · paso {original_index + 1}: espera elegida {chosen_seconds:.2f} s "
+                        f"dentro de {step['min_seconds']:g}–{step['max_seconds']:g} s."
+                    )
+                    self.post_ui(
+                        lambda pos=position, total=len(indexed_steps), chosen=chosen_seconds: self.sequence_status_var.set(
+                            f"Paso {pos} de {total}: espera aleatoria de {chosen:.2f} s."
+                        )
+                    )
+                    if self.wait_or_cancel(chosen_seconds, self.sequence_stop_event):
                         result = "detenida"
                         break
                     continue
@@ -1066,6 +1458,45 @@ class ProfessionalPhoneController:
                             f"[{device}] Secuencia: Atrás "
                             + ("ejecutado." if ok else f"falló: {detail_result}")
                         )
+                    elif step["type"] == "text":
+                        text_value = (
+                            self.sequence_list_value(list_context, device)
+                            if step["source"] == "list"
+                            else step["text"]
+                        )
+                        if text_value is None:
+                            self.log(f"[{device}] Secuencia: no existe un elemento actual de lista para escribir.")
+                            continue
+                        text_result = self.inject_text_with_interval(
+                            device,
+                            text_value,
+                            step["char_min_seconds"],
+                            step["char_max_seconds"],
+                            self.sequence_stop_event,
+                        )
+                        if text_result == "cancelled":
+                            result = "detenida"
+                            break
+                    elif step["type"] == "open_url":
+                        url_value = (
+                            self.sequence_list_value(list_context, device)
+                            if step["source"] == "list"
+                            else step["url"]
+                        )
+                        if url_value is None:
+                            self.log(f"[{device}] Secuencia: no existe un elemento actual de lista para abrir.")
+                            continue
+                        self.open_url_on_device(device, url_value)
+                    elif step["type"] == "warmup":
+                        if not self.simular_navegacion_organica(
+                            device,
+                            step["min_seconds"],
+                            step["max_seconds"],
+                            self.sequence_stop_event,
+                        ):
+                            if self.sequence_stop_event.is_set() or self.app_closing.is_set():
+                                result = "detenida"
+                                break
                 if result == "detenida":
                     break
         except Exception as error:

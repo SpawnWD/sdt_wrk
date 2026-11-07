@@ -69,12 +69,17 @@ SECUENCIAS DE ACCIONES
 - Esta pestaña es un constructor visual independiente; no cambia las funciones de Búsqueda, Interacciones ni Reportes.
 - Selecciona exactamente un teléfono y pulsa `Capturar teléfono seleccionado`. Después, pulsa sobre la imagen para registrar un toque.
 - Los toques se guardan como porcentaje de ancho y alto, por lo que se adaptan a resoluciones diferentes sin reutilizar una coordenada absoluta.
-- `Agregar espera` incorpora una pausa de 0.1 a 3600 segundos. `Agregar Atrás` registra el botón Atrás de Android.
+- El catálogo `Agregar una acción al proceso` permite configurar `Escribir texto`, `Cargar lista por renglones`, `Siguiente elemento de lista`, `Abrir liga / link`, `Calentamiento orgánico`, `Espera aleatoria` y `Atrás`.
+- `Escribir texto` admite texto fijo o el elemento actual de la lista. Las cajas mínimo y máximo controlan el intervalo aleatorio entre cada carácter; comienzan en 0.05–0.15 segundos y la ejecución puede detenerse entre letras.
+- `Cargar lista por renglones` conserva hasta 1,000 elementos; cada salto de línea inicia el siguiente elemento. `Siguiente elemento de lista` avanza un renglón sin volver automáticamente al primero cuando llega al final.
+- `Abrir liga / link` acepta un URL fijo o el elemento actual de la lista y reutiliza exclusivamente la apertura de `android.intent.action.VIEW` en Facebook Lite; no ejecuta Me gusta, Comentario ni otro proceso.
+- `Calentamiento orgánico` reutiliza `simular_navegacion_organica`, empieza en 5–15 segundos y conserva las pausas internas existentes. No se duplicó una segunda rutina.
+- `Espera aleatoria` empieza en 3–8 segundos y admite mínimo y máximo entre 0.1 y 3600 segundos. Cada ejecución elige un valor nuevo; si ambos límites son iguales, la espera queda fija. `Atrás` registra el botón Atrás de Android.
 - La lista permite subir, bajar, eliminar o limpiar pasos. Los marcadores rojos numerados muestran los toques sobre la captura.
 - `Ejecutar paso seleccionado` prueba únicamente el renglón elegido. `Ejecutar secuencia completa` procesa todos los pasos en orden sobre los teléfonos seleccionados.
 - `Detener` cancela la espera o evita que comience el siguiente paso. Cada teléfono muestra su tarea y recibe mensajes individuales en el log.
 - `Guardar` y `Cargar` utilizan archivos JSON versión 1 dentro de `secuencias`. La carpeta es operativa y se excluye de Git.
-- Los archivos cargados aceptan como máximo 500 pasos y sólo permiten `tap`, `wait` y `back`; cualquier estructura desconocida se rechaza.
+- Los archivos cargados aceptan como máximo 500 pasos y sólo permiten los tipos documentados; cualquier estructura desconocida, intervalo inválido o URL mal formada se rechaza. Las secuencias anteriores con una espera fija continúan siendo compatibles y se convierten a mínimo = máximo.
 - Esta primera versión no captura toques físicos, no contiene acciones específicas de reportes, no rota IP y no ejecuta calentamiento.
 - Cuando Android no expone ese control, puede utilizar la plantilla visual like.png como respaldo. Ya no se pulsa una coordenada fija.
 - "Solo comentario" busca el campo accesible "Escribe un comentario" / "Write a comment" al abrir y después de cada desplazamiento configurado. Acepta esos rótulos exactos y el botón exacto de publicación aunque Facebook Lite los exponga como elementos hijos; no usa coordenadas fijas como respaldo.

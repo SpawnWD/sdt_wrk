@@ -21,6 +21,61 @@ Ninguno.
 
 ## Cambios completados
 
+### CHG-20261106-1805 — Constructor ampliado de procesos y acciones
+
+- Fecha y hora de inicio: 2026-11-06 18:05:30 (America/Mexico_City)
+- Estado: Completado localmente el 2026-11-06 18:14:15 (America/Mexico_City)
+- Tipo: Ampliación solicitada por el cliente
+- Autoría: Se conserva la autoría del proyecto original; sólo se implementa y documenta la solicitud.
+- Objetivo: Evolucionar `Secuencias de acciones` al diseño de un constructor de escritorio con catálogo de acciones, parámetros visibles y ejecución ordenada.
+- Acciones solicitadas:
+  - Cargar una lista donde cada renglón representa el siguiente elemento del proceso.
+  - Avanzar explícitamente al siguiente elemento cargado.
+  - Escribir texto con intervalo aleatorio mínimo y máximo entre caracteres.
+  - Abrir una URL reutilizando únicamente el mecanismo existente de `Abrir Link / URL`.
+  - Ejecutar calentamiento orgánico reutilizando `simular_navegacion_organica`.
+  - Conservar captura visual, toque proporcional, espera aleatoria y Atrás.
+- Valores iniciales: espera `3–8 s`, calentamiento `5–15 s` e intervalo entre letras `0.05–0.15 s`; se conservan las pausas internas existentes del calentamiento.
+- Límites: Sin acciones específicas de reportes; sin duplicar la lógica existente de URL o calentamiento; sin modificar las demás pestañas.
+- Archivos modificados: `panel.py`, `LEEME.txt`, `BITACORA.md`.
+- Riesgos: contexto correcto de listas por teléfono, Unicode al escribir, cancelación entre caracteres y compatibilidad con JSON anteriores.
+- Referencia de rollback: commit `1f7c217` de la rama `integracion`.
+- Rama Git: `integracion`.
+- Implementación:
+  - Se agregó un catálogo visible con `Escribir texto`, `Cargar lista por renglones`, `Siguiente elemento de lista`, `Abrir liga / link`, `Calentamiento orgánico`, `Espera aleatoria` y `Atrás`.
+  - La captura del teléfono y los toques proporcionales permanecen disponibles como referencia visual.
+  - Cada teléfono conserva su propio contexto de lista y posición; avanzar no reinicia la lista al llegar al final.
+  - La escritura admite texto literal o el elemento actual de la lista y aplica una espera aleatoria entre cada carácter.
+  - `Abrir liga / link` reutiliza exclusivamente la apertura de Facebook Lite por `android.intent.action.VIEW`; no ejecuta Me gusta, comentario ni otro flujo posterior.
+  - `Calentamiento orgánico` reutiliza `simular_navegacion_organica` y respeta el botón Detener.
+  - El diseño se compactó para mantener visibles la captura, la lista de pasos y los controles de ejecución en una pantalla de escritorio.
+- Pruebas:
+  - `python -m py_compile panel.py`: correcto.
+  - `git diff --check`: correcto.
+  - Validación simulada del catálogo, carga/avance de lista, escritura, apertura de URL, calentamiento, espera, Atrás y toque proporcional: correcta.
+  - Escritura simulada carácter por carácter, espacios, demora aleatoria y cancelación: correcta.
+  - Compatibilidad de carga con esperas fijas del JSON anterior: correcta.
+  - Revisión visual del panel: catálogo completo y controles de ejecución visibles.
+  - No se ejecutaron acciones reales sobre el teléfono durante esta verificación.
+- Commit resultante: El commit de la rama `integracion` que contiene esta entrada.
+
+### CHG-20261106-1747 — Espera aleatoria mínima y máxima en Secuencias
+
+- Fecha y hora de inicio: 2026-11-06 17:47:00 (America/Mexico_City)
+- Estado: Completado localmente el 2026-11-06 18:14:15 (America/Mexico_City)
+- Tipo: Mejora solicitada por el cliente
+- Autoría: Se conserva la autoría del proyecto original; sólo se implementa y documenta la solicitud.
+- Objetivo: Sustituir la espera fija del constructor de secuencias por una espera aleatoria configurable entre un mínimo y un máximo, como la opción existente en Interacciones y Búsqueda.
+- Compatibilidad: Los JSON anteriores que contengan `seconds` deben cargarse como una espera fija equivalente, sin quedar corruptos.
+- Archivos modificados: `panel.py`, `LEEME.txt`, `BITACORA.md`.
+- Riesgos: validar mínimo y máximo, conservar la cancelación inmediata y guardar un formato estable.
+- Referencia de rollback: commit `1f7c217` de la rama `integracion`.
+- Rama Git: `integracion`.
+- Implementación: La espera se guarda como `min_seconds` y `max_seconds`, elige un valor aleatorio al ejecutar y sigue siendo cancelable.
+- Compatibilidad: Una espera antigua con `seconds` se normaliza como mínimo y máximo iguales.
+- Pruebas: Compilación, validación de formato, espera aleatoria simulada y compatibilidad anterior correctas.
+- Commit resultante: El commit de la rama `integracion` que contiene esta entrada.
+
 ### CHG-20261106-1735 — Pestaña inicial de Secuencias de acciones
 
 - Fecha y hora de inicio: 2026-11-06 17:35:00 (America/Mexico_City)
