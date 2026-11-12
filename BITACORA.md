@@ -21,6 +21,36 @@ Ninguno.
 
 ## Cambios completados
 
+### CHG-20261112-0847 — Tiempo de espera en saltos de 500 ms y secuencias paralelas
+
+- Fecha y hora de inicio: 2026-11-12 08:47:03 (America/Mexico_City)
+- Estado: Completado localmente el 2026-11-12 08:48:58 (America/Mexico_City)
+- Tipo: Mejora funcional solicitada por el cliente
+- Autoría: Se conserva la autoría del proyecto original; el ajuste se limita al constructor de tareas solicitado.
+- Objetivo: Mostrar una acción `Tiempo de espera` con mínimo `1` y máximo `4` segundos, eligiendo aleatoriamente sólo valores separados por `0.5` segundos.
+- Interpretación del ejemplo: Al solicitar incrementos de 500 ms, el valor indicado como `2.3` se interpreta como `2.5`; las opciones de 1 a 4 serán `1, 1.5, 2, 2.5, 3, 3.5, 4`.
+- Simultaneidad: Cada teléfono seleccionado debe ejecutar la secuencia completa en su propio hilo y elegir su propio tiempo aleatorio, sin esperar a que otro teléfono termine sus acciones.
+- Compatibilidad: Las secuencias JSON antiguas sin marca de incremento conservarán su espera continua anterior; las nuevas usarán `0.5` segundos.
+- Alcance: `panel.py`, `LEEME.txt` y esta bitácora.
+- Riesgos: coordinación del botón Detener, liberación de dispositivos al finalizar y mensajes concurrentes en la interfaz.
+- Referencia de rollback: commit `dea191f` de la rama `integracion`.
+- Rama Git: `integracion`.
+- Implementación:
+  - El catálogo ahora muestra `Tiempo de espera` con valores iniciales mínimo `1` y máximo `4` segundos.
+  - Los nuevos pasos guardan `interval_step: 0.5` y sólo aceptan límites alineados a 500 ms.
+  - Cada ejecución elige mediante enteros de medio segundo, evitando decimales intermedios.
+  - Las secuencias antiguas sin `interval_step` conservan su comportamiento continuo anterior y no quedan corruptas.
+  - El controlador crea un trabajador independiente por teléfono seleccionado; cada uno mantiene su propia lista, posición, pasos y tiempo aleatorio.
+  - La finalización y liberación de equipos ocurre únicamente después de que todos los trabajadores terminan; `Detener` continúa siendo compartido.
+- Pruebas:
+  - Compilación de `panel.py` y `git diff --check`: correctos.
+  - Para 1–4 segundos se generó exactamente el conjunto `1, 1.5, 2, 2.5, 3, 3.5, 4`.
+  - Límites no alineados a 500 ms rechazados; espera antigua no alineada aceptada por compatibilidad.
+  - Dos teléfonos simulados alcanzaron la espera en paralelo y eligieron valores independientes válidos.
+  - Catálogo, valores iniciales y paso JSON verificados en una instancia aislada de la interfaz.
+  - No se ejecutaron acciones reales sobre los teléfonos.
+- Commit resultante: El commit de la rama `integracion` que contiene esta entrada.
+
 ### CHG-20261112-0839 — Acción dedicada para identificar Publicar y pulsarlo
 
 - Fecha y hora de inicio: 2026-11-12 08:39:27 (America/Mexico_City)

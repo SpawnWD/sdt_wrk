@@ -76,7 +76,7 @@ class ProfessionalPhoneController:
         "Siguiente elemento de lista": "next_list",
         "Abrir liga / link": "open_url",
         "Calentamiento orgánico": "warmup",
-        "Espera aleatoria": "wait",
+        "Tiempo de espera": "wait",
         "Atrás": "back",
     }
 
@@ -951,8 +951,8 @@ class ProfessionalPhoneController:
                 label = "Duración del calentamiento — mínimo:"
                 minimum_default, maximum_default = "5", "15"
             else:
-                label = "Tiempo de espera — mínimo:"
-                minimum_default, maximum_default = "3", "8"
+                label = "Tiempo de espera aleatorio — mínimo:"
+                minimum_default, maximum_default = "1", "4"
             ttk.Label(row, text=label).pack(side="left")
             self.sequence_action_min_var = tk.StringVar(value=minimum_default)
             self.sequence_action_max_var = tk.StringVar(value=maximum_default)
@@ -964,6 +964,12 @@ class ProfessionalPhoneController:
                 ttk.Label(
                     row,
                     text="Reutiliza el calentamiento orgánico actual con sus pausas internas.",
+                    foreground="#1d5f91",
+                ).pack(side="left", padx=(12, 0))
+            else:
+                ttk.Label(
+                    row,
+                    text="Valores disponibles cada 0.5 s (500 ms).",
                     foreground="#1d5f91",
                 ).pack(side="left", padx=(12, 0))
             return
@@ -1101,7 +1107,7 @@ class ProfessionalPhoneController:
                 return messagebox.showwarning("URL requerida", "Escribe una liga o activa el elemento actual de la lista.")
             step.update({"source": "list" if use_list else "literal", "url": "" if use_list else url_value})
         elif action_type in {"warmup", "wait"}:
-            minimum_allowed = 1.0 if action_type == "warmup" else 0.1
+            minimum_allowed = 1.0 if action_type == "warmup" else 0.5
             interval = self.read_sequence_interval(
                 self.sequence_action_min_var,
                 self.sequence_action_max_var,
@@ -1112,6 +1118,14 @@ class ProfessionalPhoneController:
             if not interval:
                 return
             step.update({"min_seconds": interval[0], "max_seconds": interval[1]})
+            if action_type == "wait":
+                if any(abs(value * 2 - round(value * 2)) > 1e-9 for value in interval):
+                    return messagebox.showwarning(
+                        "Intervalo no válido",
+                        "El mínimo y el máximo deben avanzar de 0.5 en 0.5 segundos.",
+                        parent=self.root,
+                    )
+                step["interval_step"] = 0.5
         self.add_sequence_step(step)
 
     def capture_sequence_screen(self):
@@ -1292,13 +1306,26 @@ class ProfessionalPhoneController:
                     minimum = maximum = float(step["seconds"])
             except (KeyError, TypeError, ValueError):
                 return None
+            interval_step = step.get("interval_step")
+            if interval_step is not None:
+                try:
+                    interval_step = float(interval_step)
+                except (TypeError, ValueError):
+                    return None
+                if interval_step != 0.5:
+                    return None
+                if minimum < 0.5 or any(abs(value * 2 - round(value * 2)) > 1e-9 for value in (minimum, maximum)):
+                    return None
             if not 0.1 <= minimum <= 3600.0 or not 0.1 <= maximum <= 3600.0 or minimum > maximum:
                 return None
-            return {
+            validated_wait = {
                 "type": "wait",
                 "min_seconds": round(minimum, 3),
                 "max_seconds": round(maximum, 3),
             }
+            if interval_step is not None:
+                validated_wait["interval_step"] = interval_step
+            return validated_wait
         if step_type == "warmup":
             try:
                 minimum = float(step["min_seconds"])
@@ -1389,6 +1416,8 @@ class ProfessionalPhoneController:
             maximum = step["max_seconds"]
             if minimum == maximum:
                 return "Espera", f"{minimum:g} segundos (fija)"
+            if step.get("interval_step") == 0.5:
+                return "Tiempo de espera", f"Aleatorio: {minimum:g} a {maximum:g} segundos · saltos de 0.5 s"
             return "Espera", f"Aleatoria: {minimum:g} a {maximum:g} segundos"
         if step["type"] == "warmup":
             return "Calentamiento", f"Orgánico: {step['min_seconds']:g} a {step['max_seconds']:g} segundos"
@@ -1842,8 +1871,53 @@ class ProfessionalPhoneController:
             if needs_unicode and previous_ime and previous_ime != "null":
                 self.run_on_device(device, ["shell", "ime", "set", previous_ime], timeout=15)
 
+    def choose_sequence_wait_seconds(self, step):
+        minimum = step["min_seconds"]
+        maximum = step["max_seconds"]
+        if minimum == maximum:
+            return minimum
+        if step.get("interval_step") == 0.5:
+            minimum_tick = round(minimum * 2)
+            maximum_tick = round(maximum * 2)
+            return random.randint(minimum_tick, maximum_tick) / 2.0
+        # Compatibilidad con secuencias guardadas antes de los saltos de 500 ms.
+        return random.uniform(minimum, maximum)
+
     def sequence_execution_worker(self, devices, indexed_steps, previous_tasks):
+        results = {}
+        results_lock = threading.Lock()
+
+        def run_device(device):
+            try:
+                device_result = self.sequence_device_worker(device, indexed_steps)
+            except Exception as error:
+                device_result = "con error"
+                self.log(f"[{device}] Secuencia: el trabajador terminó con error: {error}")
+            with results_lock:
+                results[device] = device_result
+
+        threads = [
+            threading.Thread(target=run_device, args=(device,), daemon=True)
+            for device in devices
+        ]
+        for thread in threads:
+            thread.start()
+        for thread in threads:
+            thread.join()
+
+        if any(value == "con error" for value in results.values()):
+            result = "con error"
+        elif any(value == "detenida" for value in results.values()):
+            result = "detenida"
+        else:
+            result = "completada"
+        self.post_ui(
+            lambda r=result, devs=list(devices), prev=previous_tasks: self.finish_sequence_execution(r, devs, prev)
+        )
+
+    def sequence_device_worker(self, device, indexed_steps):
         result = "completada"
+        devices = [device]
         list_context = {device: {"items": [], "index": 0} for device in devices}
         try:
             for position, (original_index, step) in enumerate(indexed_steps, start=1):
@@ -1878,14 +1952,14 @@ class ProfessionalPhoneController:
                             self.log(f"[{device}] Secuencia: se alcanzó el final de la lista.")
                     continue
                 if step["type"] == "wait":
-                    chosen_seconds = random.uniform(step["min_seconds"], step["max_seconds"])
+                    chosen_seconds = self.choose_sequence_wait_seconds(step)
                     self.log(
-                        f"Secuencia · paso {original_index + 1}: espera elegida {chosen_seconds:.2f} s "
+                        f"[{device}] Secuencia · paso {original_index + 1}: espera elegida {chosen_seconds:g} s "
                         f"dentro de {step['min_seconds']:g}–{step['max_seconds']:g} s."
                     )
                     self.post_ui(
-                        lambda pos=position, total=len(indexed_steps), chosen=chosen_seconds: self.sequence_status_var.set(
-                            f"Paso {pos} de {total}: espera aleatoria de {chosen:.2f} s."
+                        lambda dev=device, pos=position, total=len(indexed_steps), chosen=chosen_seconds: self.sequence_status_var.set(
+                            f"{self.display_device_name(dev)} · paso {pos} de {total}: espera de {chosen:g} s."
                         )
                     )
                     if self.wait_or_cancel(chosen_seconds, self.sequence_stop_event):
@@ -1999,9 +2073,8 @@ class ProfessionalPhoneController:
                     break
         except Exception as error:
             result = "con error"
-            self.log(f"Secuencia: error inesperado: {error}")
-        finally:
-            self.post_ui(lambda r=result, devs=list(devices), prev=previous_tasks: self.finish_sequence_execution(r, devs, prev))
+            self.log(f"[{device}] Secuencia: error inesperado: {error}")
+        return result
 
     def finish_sequence_execution(self, result, devices, previous_tasks):
         self.sequence_running = False
