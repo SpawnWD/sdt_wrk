@@ -2789,7 +2789,13 @@ class ProfessionalPhoneController:
                 if not value or key in seen:
                     continue
                 seen.add(key)
-                records.append({"text": value, "bounds": bounds, "source": "accessibility"})
+                records.append({
+                    "text": value,
+                    "bounds": bounds,
+                    "source": "accessibility",
+                    "class": node.attrib.get("class", ""),
+                    "editable": node.attrib.get("editable", "false").casefold() == "true",
+                })
         return records
 
     def windows_ocr_records(self, device):
@@ -3772,17 +3778,45 @@ class ProfessionalPhoneController:
                     break
         return "not_found"
 
-    def find_comment_text_above_editor(self, records, expected_text, screen_size):
+    def bottom_comment_editor_top(self, hierarchy, screen_size):
+        if hierarchy is None or not screen_size:
+            return None
+        _, height = screen_size
+        candidates = []
+        for node in hierarchy.iter("node"):
+            class_name = node.attrib.get("class", "").casefold()
+            editable = node.attrib.get("editable", "false").casefold() == "true"
+            if not ("edittext" in class_name or "autocompletetextview" in class_name or editable):
+                continue
+            bounds = self.parse_node_bounds(node)
+            if not bounds:
+                continue
+            center_y = (bounds[1] + bounds[3]) // 2
+            if center_y >= height * 0.55:
+                candidates.append((center_y, bounds[1]))
+        if not candidates:
+            return None
+        candidates.sort(reverse=True)
+        return candidates[0][1]
+
+    def find_comment_text_above_editor(
+        self,
+        records,
+        expected_text,
+        screen_size,
+        section_top=None,
+        editor_top=None,
+    ):
         if not records or not expected_text or not screen_size:
             return False
-        width, height = screen_size
+        _, height = screen_size
         expected = self.normalize_search_text(expected_text)
         expected = re.sub(r"[^\w\s]", " ", expected, flags=re.UNICODE)
         expected = re.sub(r"\s+", " ", expected).strip()
         if len(expected) < 3:
             return False
-        editor_top = int(height * 0.98)
-        section_top = int(height * 0.55)
+        editor_top = int(editor_top if editor_top is not None else height * 0.98)
+        section_top = int(section_top if section_top is not None else height * 0.55)
         section_headers = []
         for record in records:
             normalized = self.normalize_search_text(record.get("text", "")).strip()
@@ -3800,6 +3834,9 @@ class ProfessionalPhoneController:
             bounds = record.get("bounds")
             text_value = record.get("text", "").strip()
             if not bounds or not text_value:
+                continue
+            class_name = record.get("class", "").casefold()
+            if record.get("editable") or "edittext" in class_name or "autocompletetextview" in class_name:
                 continue
             center_y = (bounds[1] + bounds[3]) // 2
             normalized = self.normalize_search_text(text_value).strip()
@@ -3836,6 +3873,7 @@ class ProfessionalPhoneController:
             hierarchy = self.get_android_hierarchy(device)
             records = self.accessibility_text_records(hierarchy)
             records.extend(self.windows_ocr_records(device))
+            editor_top = self.bottom_comment_editor_top(hierarchy, size)
             visible_text = self.normalize_search_text(" ".join(record.get("text", "") for record in records))
             if any(message in visible_text for message in (
                 "se publico tu comentario",
@@ -3846,12 +3884,97 @@ class ProfessionalPhoneController:
             )):
                 self.log(f"[{device}] Comentario confirmado por el aviso de publicación de Facebook.")
                 return True
-            if self.find_comment_text_above_editor(records, expected_text, size):
+            if self.find_comment_text_above_editor(
+                records, expected_text, size, editor_top=editor_top
+            ):
                 self.log(f"[{device}] Comentario confirmado por su texto visible sobre el editor.")
                 return True
             if attempt + 1 < checks and self.wait_or_cancel(delay, self.search_stop_event):
                 return False
         return False
+
+    def validate_recent_comment_after_actions(self, device, expected_text, max_scrolls=6):
+        """Busca el comentario reciente debajo de Me gusta/Comentario/Compartir."""
+        size = self.get_device_screen_size(device)
+        if not size:
+            return "inconclusive"
+        width, height = size
+        action_row_seen = False
+        for attempt in range(max(0, max_scrolls) + 1):
+            hierarchy = self.get_android_hierarchy(device)
+            records = self.accessibility_text_records(hierarchy)
+            records.extend(self.windows_ocr_records(device))
+            editor_top = self.bottom_comment_editor_top(hierarchy, size)
+            visible_text = self.normalize_search_text(
+                " ".join(record.get("text", "") for record in records)
+            )
+            if any(message in visible_text for message in (
+                "se publico tu comentario",
+                "tu comentario se publico",
+                "comentario publicado",
+                "your comment was posted",
+                "comment posted",
+            )):
+                self.log(f"[{device}] Comentario confirmado por el aviso de Facebook antes del reintento.")
+                return "found"
+
+            screen = self.capture_device_screen(device)
+            action_points = []
+            if screen is not None:
+                for template_name, x_range in (
+                    ("like_outline.png", (0.00, 0.38)),
+                    ("comment_outline.png", (0.25, 0.68)),
+                ):
+                    match = self.locate_action_figure(screen, template_name, x_range)
+                    if match:
+                        action_points.append(match["point"])
+            section_top = None
+            if action_points:
+                action_y = int(sum(point[1] for point in action_points) / len(action_points))
+                action_row_seen = True
+                section_top = action_y + max(12, int(height * 0.018))
+                self.log(f"[{device}] Fila de acciones localizada en y={action_y}; validando debajo de ella.")
+            elif action_row_seen:
+                section_top = int(height * 0.12)
+
+            if action_row_seen and self.find_comment_text_above_editor(
+                records,
+                expected_text,
+                size,
+                section_top=section_top,
+                editor_top=editor_top,
+            ):
+                self.log(
+                    f"[{device}] Comentario reciente confirmado debajo de la fila de acciones; "
+                    "se cancela el reintento."
+                )
+                return "found"
+
+            if attempt >= max_scrolls:
+                break
+            ok, detail = self.run_on_device(
+                device,
+                [
+                    "shell", "input", "swipe",
+                    str(width // 2), str(int(height * 0.74)),
+                    str(width // 2), str(int(height * 0.50)), "550",
+                ],
+                timeout=15,
+            )
+            if not ok:
+                self.log(f"[{device}] No se pudo desplazar para validar el comentario: {detail}")
+                return "inconclusive"
+            if self.wait_or_cancel(0.85, self.search_stop_event):
+                return "cancelled"
+
+        if not action_row_seen:
+            self.log(
+                f"[{device}] No se localizó la fila Me gusta/Comentario/Compartir; "
+                "no se reintentará para evitar duplicidad."
+            )
+            return "inconclusive"
+        self.log(f"[{device}] La fila de acciones se revisó, pero el comentario reciente no apareció.")
+        return "not_found"
 
     def perform_search_post_comment_once(self, device, comment_text):
         size = self.get_device_screen_size(device)
@@ -3894,7 +4017,8 @@ class ProfessionalPhoneController:
         )
         if not ok or self.wait_or_cancel(0.8, self.search_stop_event):
             return "field_error"
-        self.clear_focused_text(device, 500)
+        if not self.clear_focused_text(device, 500):
+            return "clear_error"
         if self.wait_or_cancel(0.3, self.search_stop_event):
             return "cancelled"
         if not self.inject_text_adb(device, comment_text):
@@ -3940,9 +4064,19 @@ class ProfessionalPhoneController:
             if attempt == 0:
                 if self.wait_or_cancel(1.5, self.search_stop_event):
                     return "cancelled"
-                if self.published_comment_visible(device, comment_text, checks=2, delay=1.2):
-                    return "sent_late_confirmed"
-                self.log(f"[{device}] El comentario no apareció sobre el editor; se realizará un único reintento.")
+                validation = self.validate_recent_comment_after_actions(device, comment_text)
+                if validation == "found":
+                    return "sent_scrolled_confirmed"
+                if validation in {"cancelled", "inconclusive"}:
+                    self.log(
+                        f"[{device}] Validación final {validation}; no se reintentará el comentario "
+                        "para evitar duplicidad."
+                    )
+                    return "cancelled" if validation == "cancelled" else "validation_inconclusive"
+                self.log(
+                    f"[{device}] El comentario no apareció después de pasar la fila de acciones; "
+                    "se realizará un único reintento."
+                )
                 if self.wait_or_cancel(0.8, self.search_stop_event):
                     return "cancelled"
         self.log(f"[{device}] El comentario no se confirmó después del reintento; se continuará con la siguiente publicación.")
@@ -4165,7 +4299,10 @@ class ProfessionalPhoneController:
                             f"{link_line}"
                         ), st=status, c=ctx: self.report_match(m, st, c)
                     )
-                    if comment_result and comment_result not in {"sent", "sent_late_confirmed", "sent_after_retry", "cancelled"}:
+                    if comment_result and comment_result not in {
+                        "sent", "sent_late_confirmed", "sent_scrolled_confirmed",
+                        "sent_after_retry", "cancelled",
+                    }:
                         self.log(
                             f"[{dev}] Comentario sin confirmación final ({comment_result}); "
                             "se saldrá de la publicación y continuará la búsqueda."
@@ -4523,7 +4660,9 @@ class ProfessionalPhoneController:
                         self.log(f"[{d}] No se pudo activar el campo de comentario: {detail}")
                         return
                     if self.wait_or_cancel(1.0, self.interaction_stop_event): return
-                    self.clear_focused_text(d, 500)
+                    if not self.clear_focused_text(d, 500):
+                        self.log(f"[{d}] El editor conservó texto anterior; no se escribirá ni publicará otro comentario.")
+                        return
                     if self.wait_or_cancel(0.4, self.interaction_stop_event): return
                     if not self.inject_text_adb(d, txt): return
                     if self.wait_or_cancel(1.0, self.interaction_stop_event): return
@@ -4729,12 +4868,68 @@ class ProfessionalPhoneController:
 
     def clear_focused_text(self, device, character_count):
         """Limpia un borrador parcial sin tocar ningún botón de publicación."""
-        count = max(1, min(int(character_count) + 5, 500))
+        placeholders = (
+            "escribe un comentario", "write a comment", "comenta como",
+            "comentar como", "comment as", "add a comment",
+        )
+
+        def current_editor_text():
+            hierarchy = self.get_android_hierarchy(device)
+            size = self.get_device_screen_size(device)
+            if hierarchy is None or not size:
+                return None
+            _, height = size
+            candidates = []
+            for node in hierarchy.iter("node"):
+                class_name = node.attrib.get("class", "").casefold()
+                editable = node.attrib.get("editable", "false").casefold() == "true"
+                if not ("edittext" in class_name or "autocompletetextview" in class_name or editable):
+                    continue
+                bounds = self.parse_node_bounds(node)
+                if not bounds:
+                    continue
+                center_y = (bounds[1] + bounds[3]) // 2
+                if center_y >= height * 0.55:
+                    candidates.append((center_y, node.attrib.get("text", "").strip()))
+            if not candidates:
+                return None
+            candidates.sort(reverse=True)
+            value = candidates[0][1]
+            normalized = self.normalize_search_text(value).strip()
+            if not value or normalized.startswith(placeholders):
+                return ""
+            return value
+
+        # Seleccionar todo evita residuos cuando Facebook divide el borrador en varias líneas.
+        for _ in range(2):
+            self.run_on_device(
+                device, ["shell", "input", "keycombination", "113", "29"], timeout=15
+            )
+            ok, _ = self.run_on_device(device, ["shell", "input", "keyevent", "67"], timeout=15)
+            if not ok:
+                return False
+            time.sleep(0.18)
+            remaining = current_editor_text()
+            if remaining == "":
+                return True
+
+        remaining = current_editor_text()
+        count = max(1, min(len(remaining or "") + int(character_count) + 10, 500))
         self.run_on_device(device, ["shell", "input", "keyevent", "123"], timeout=15)
         ok, _ = self.run_on_device(
             device, ["shell", "input", "keyevent"] + (["67"] * count), timeout=20
         )
-        return ok
+        if not ok:
+            return False
+        time.sleep(0.18)
+        remaining = current_editor_text()
+        if remaining is None:
+            self.log(f"[{device}] No se pudo verificar que el editor quedara vacío; se cancela la escritura.")
+            return False
+        if remaining != "":
+            self.log(f"[{device}] El editor no quedó vacío; se cancela la escritura para evitar concatenar texto.")
+            return False
+        return True
 
     def visible_text_contains(self, device, expected_text):
         hierarchy = self.get_android_hierarchy(device)

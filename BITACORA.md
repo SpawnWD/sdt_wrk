@@ -21,6 +21,41 @@ Esta bitácora registra el estado base del proyecto y todos los cambios que se r
 
 ## Cambios completados
 
+### CHG-20261112-1528 — Validación desplazada del comentario antes del reintento
+
+- Fecha y hora de inicio: 2026-11-12 15:28:58 (America/Mexico_City)
+- Estado: Completado localmente el 2026-11-12 15:36:11 (America/Mexico_City)
+- Tipo: Corrección para evitar comentarios duplicados
+- Objetivo: Después del primer envío, pasar visualmente la fila Me gusta/Comentario/Compartir y comprobar el texto del comentario reciente antes de autorizar un reintento.
+- Regla de seguridad: nunca se reintenta mientras el comentario esperado aparezca debajo de la fila de acciones; la prueba de desarrollo no publicó otro comentario.
+- Alcance: flujo de comentarios en Búsqueda, limpieza del editor, documentación y bitácora.
+- Referencia de rollback: commit `8abeebe` de la rama `integracion`.
+- Rama Git: `integracion`.
+- Diagnóstico real:
+  - El primer comentario estaba publicado como reciente debajo de la fila de acciones.
+  - La validación se ejecutó antes de desplazar hasta esa zona y comenzó el segundo intento.
+  - El segundo intento permanecía únicamente como borrador porque el operador detuvo el proceso antes del envío.
+  - Facebook mostraba una corrección ortográfica de un carácter respecto del texto solicitado; la similitud era suficiente para considerarlo el mismo comentario.
+- Implementación:
+  - La validación desplaza en pasos cortos hasta seis veces para localizar visualmente Me gusta y Comentario.
+  - Sólo compara texto situado debajo de la fila de acciones y por encima del editor inferior.
+  - Los nodos `EditText` y `MultiAutoCompleteTextView`, además de su zona OCR, quedan excluidos para no confundir un borrador con un comentario publicado.
+  - Se admiten diferencias OCR u ortográficas pequeñas mediante la comparación difusa existente.
+  - Resultado `found`: cancela el reintento; `not_found`: permite un único reintento; `inconclusive`: no reintenta para evitar duplicidad.
+  - La limpieza del editor ahora usa Seleccionar todo, borra y verifica el resultado. Si no puede demostrar que quedó vacío, cancela la escritura.
+  - El borrador duplicado que permanecía en el teléfono se eliminó sin tocar el comentario ya publicado.
+- Pruebas:
+  - Compilación y `git diff --check`: correctos.
+  - Caso real visible: fila de acciones localizada en `y=885` y comentario reciente confirmado debajo de ella.
+  - La diferencia ortográfica mínima fue aceptada; el mismo texto dentro del editor fue rechazado como evidencia de publicación.
+  - Simulación con la fila fuera de pantalla: realizó un desplazamiento y confirmó después.
+  - Estados `found`, `not_found` e `inconclusive`: uno, dos y un intento respectivamente.
+  - No se envió ningún comentario durante las pruebas.
+  - Constructor oficial completado sin cerrar la versión activa.
+- Entrega: `release_1.88.1/AdministracionDeMoviles.exe` (87,064,918 bytes) y `SHA256.txt`.
+- SHA-256: `A4BE1E82112C74E31BC481097DE7BC887A257E00D062613F410D5D007A3F89F1`.
+- Commit resultante: El commit de la rama `integracion` que contiene esta entrada.
+
 ### CHG-20261112-1450 — Enlace y acciones opcionales en publicaciones sin texto accesible
 
 - Fecha y hora de inicio: 2026-11-12 14:50:41 (America/Mexico_City)
