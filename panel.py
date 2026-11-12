@@ -68,6 +68,7 @@ class ProfessionalPhoneController:
         "Dar clic en la captura": "tap",
         "Presionar y deslizar": "swipe",
         "Identificar texto y pulsar": "tap_text",
+        "Identificar Publicar y pulsar": "tap_publish",
         "Escribir texto": "text",
         "Ocultar teclado": "hide_keyboard",
         "Subir imagen/video al teléfono": "upload_media",
@@ -845,6 +846,17 @@ class ProfessionalPhoneController:
             ).pack(anchor="w", pady=(4, 0))
             return
 
+        if action_type == "tap_publish":
+            ttk.Label(
+                self.sequence_action_fields,
+                text=(
+                    "Localiza el texto exacto Publicar y pulsa la coincidencia superior. "
+                    "Usa accesibilidad y OCR; no depende de coordenadas fijas."
+                ),
+                foreground="#1d5f91",
+            ).pack(anchor="w")
+            return
+
         if action_type == "hide_keyboard":
             ttk.Label(
                 self.sequence_action_fields,
@@ -1257,6 +1269,8 @@ class ProfessionalPhoneController:
             if not target_text or len(target_text) > 500:
                 return None
             return {"type": "tap_text", "target_text": target_text}
+        if step_type == "tap_publish":
+            return {"type": "tap_publish"}
         if step_type == "hide_keyboard":
             return {"type": "hide_keyboard"}
         if step_type == "upload_media":
@@ -1363,6 +1377,8 @@ class ProfessionalPhoneController:
             )
         if step["type"] == "tap_text":
             return "Identificar y pulsar", f'Texto exacto: "{step["target_text"][:80]}"'
+        if step["type"] == "tap_publish":
+            return "Identificar Publicar", "Pulsar la coincidencia exacta superior"
         if step["type"] == "hide_keyboard":
             return "Ocultar teclado", "Cerrar sólo cuando Android confirme que está visible"
         if step["type"] == "upload_media":
@@ -1918,6 +1934,8 @@ class ProfessionalPhoneController:
                         )
                     elif step["type"] == "tap_text":
                         self.tap_visible_text(device, step["target_text"])
+                    elif step["type"] == "tap_publish":
+                        self.tap_visible_text(device, "Publicar")
                     elif step["type"] == "hide_keyboard":
                         self.hide_keyboard_if_visible(device)
                     elif step["type"] == "upload_media":

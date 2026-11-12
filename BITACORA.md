@@ -21,6 +21,32 @@ Ninguno.
 
 ## Cambios completados
 
+### CHG-20261112-0839 — Acción dedicada para identificar Publicar y pulsarlo
+
+- Fecha y hora de inicio: 2026-11-12 08:39:27 (America/Mexico_City)
+- Estado: Completado localmente el 2026-11-12 08:41:22 (America/Mexico_City)
+- Tipo: Funcionalidad solicitada por el cliente
+- Autoría: Se conserva la autoría del proyecto original; el ajuste se limita al constructor de tareas solicitado.
+- Objetivo: Agregar una acción directa que identifique el control `Publicar` visible y pulse su centro.
+- Evidencia del teléfono conectado: La pantalla real muestra `Publicar` en la barra superior y al final del formulario; OCR local los ubicó en `(557,60)-(681,83)` y `(299,1430)-(423,1456)` respectivamente. Facebook Lite no expuso el texto en la jerarquía Android.
+- Criterio: Priorizar la coincidencia superior para evitar ambigüedad; reutilizar la búsqueda existente por accesibilidad/OCR y no usar coordenadas fijas.
+- Alcance: `panel.py`, `LEEME.txt` y esta bitácora.
+- Riesgos: cambios visuales de Facebook Lite o aparición de otro texto idéntico por encima del botón.
+- Referencia de rollback: commit `39f90ea` de la rama `integracion`.
+- Rama Git: `integracion`.
+- Implementación:
+  - Se agregó `Identificar Publicar y pulsar` al catálogo de Secuencias de acciones.
+  - La acción busca el texto correcto `Publicar` mediante la función existente de accesibilidad/OCR.
+  - Cuando hay varias coincidencias exactas, se elige la superior; no se guardan coordenadas fijas.
+  - La ejecución registra el origen y las coordenadas calculadas o informa si no encuentra el control.
+- Pruebas:
+  - Compilación de `panel.py` y `git diff --check`: correctos.
+  - Pantalla real del teléfono conectado: OCR local identificó el control superior en `(619,71)`.
+  - Prioridad de coincidencia superior y validación del paso: correctas.
+  - Acción y explicación verificadas en una instancia aislada de la interfaz.
+  - No se pulsó `Publicar` ni se transmitió contenido durante las pruebas.
+- Commit resultante: El commit de la rama `integracion` que contiene esta entrada.
+
 ### CHG-20261112-0830 — Acción para subir imagen o video al teléfono
 
 - Fecha y hora de inicio: 2026-11-12 08:30:29 (America/Mexico_City)
