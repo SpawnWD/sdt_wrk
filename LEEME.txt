@@ -84,6 +84,7 @@ SECUENCIAS DE ACCIONES
 - Las secuencias se ejecutan en paralelo: cada teléfono seleccionado conserva su propia lista, tiempos aleatorios y avance de pasos. El botón `Detener` interrumpe todos los teléfonos de la ejecución actual.
 - La lista permite subir, bajar, eliminar o limpiar pasos. Los marcadores rojos numerados muestran los toques sobre la captura.
 - `Ejecutar paso seleccionado` prueba únicamente el renglón elegido. `Ejecutar secuencia completa` procesa todos los pasos en orden sobre los teléfonos seleccionados.
+
 - `Detener` cancela la espera o evita que comience el siguiente paso. Cada teléfono muestra su tarea y recibe mensajes individuales en el log.
 - `Guardar` y `Cargar` utilizan archivos JSON versión 1 dentro de `secuencias`. La carpeta es operativa y se excluye de Git.
 - Los archivos cargados aceptan como máximo 500 pasos y sólo permiten los tipos documentados; cualquier estructura desconocida, intervalo inválido o URL mal formada se rechaza. Las secuencias anteriores con una espera fija continúan siendo compatibles y se convierten a mínimo = máximo.
@@ -100,6 +101,23 @@ SECUENCIAS DE ACCIONES
 - Si el texto permanece después del toque, el panel informa que el envío no fue confirmado y deja la publicación abierta para revisión; no regresa automáticamente al feed.
 - Para comentarios con acentos, eñes, emojis u otros caracteres Unicode se requiere ADB Keyboard (com.android.adbkeyboard). Si no está disponible, el panel cancela la publicación para no enviar texto incompleto.
 - Un teléfono ocupado por una búsqueda, un Me gusta o un comentario no puede ser tomado al mismo tiempo por otra de esas tareas.
+
+VERSION EJECUTABLE Y LICENCIA
+- Para reconstruir la distribución instala PyInstaller con `python -m pip install pyinstaller` y ejecuta `Construir Ejecutable.ps1` desde PowerShell.
+- La carpeta `release` generada por `Construir Ejecutable.ps1` contiene `PanelCelularesV2.exe` y su archivo de comprobación SHA-256; no contiene archivos fuente `.py`.
+- El ejecutable muestra una pantalla de inicio y valida la licencia antes de abrir el panel.
+- La activación se renueva cada 20 días usando la contraseña dinámica acordada, calculada con la fecha local del día de activación. La contraseña no se guarda en el equipo ni en la licencia.
+- Si el ejecutable está en un disco fijo, la licencia se vincula al equipo. Si se ejecuta desde una unidad que Windows identifica como removible, se vincula al número de volumen de esa USB.
+- Copiar el paquete a otro equipo, cambiar de USB, formatear la unidad o reinstalar Windows provoca una nueva solicitud de activación.
+- La licencia está firmada y detecta retrocesos de fecha respecto del último inicio. Es una protección local: dificulta el uso no autorizado, pero no sustituye una validación remota ni hace imposible el análisis de un ejecutable.
+- El ejecutable incluye internamente ADB, scrcpy, OCR y plantillas. Los registros, secuencias y configuración se crean junto al ejecutable durante el uso.
+- Al no contar con un certificado de firma de código, Windows o el antivirus pueden mostrar una advertencia sobre un ejecutable nuevo; el archivo `SHA256.txt` permite comprobar que no cambió después de construirlo.
+
+ORGANIZACIÓN DE LA INTERFAZ
+- El encabezado muestra la sección actual y el número de teléfonos conectados y seleccionados.
+- La navegación lateral agrupa las nueve secciones en Operación, Automatización y Herramientas; el botón azul indica la vista activa.
+- El registro de actividad permanece en la parte inferior y puede mostrarse u ocultarse para aprovechar mejor el espacio de trabajo.
+- Esta reorganización no cambia ni elimina las funciones de las vistas existentes.
 
 SEGURIDAD Y DIAGNÓSTICO
 - El panel bloquea instancias duplicadas para no interferir con las conexiones.

@@ -24,7 +24,12 @@ import base64
 
 NO_WINDOW = getattr(subprocess, "CREATE_NO_WINDOW", 0) if os.name == "nt" else 0
 INSTANCE_MUTEX = None
-BASE_DIR = Path(__file__).resolve().parent
+if getattr(sys, "frozen", False):
+    BASE_DIR = Path(sys.executable).resolve().parent
+    RESOURCE_DIR = Path(getattr(sys, "_MEIPASS", BASE_DIR)).resolve()
+else:
+    BASE_DIR = Path(__file__).resolve().parent
+    RESOURCE_DIR = BASE_DIR
 
 def acquire_single_instance():
     global INSTANCE_MUTEX
@@ -83,8 +88,9 @@ class ProfessionalPhoneController:
     def __init__(self, root):
         self.root = root
         self.root.title("Panel de Control Multi-Dispositivo - FB Lite & Modo Agencia")
-        self.root.geometry("1150x950")
-        self.root.minsize(1000, 750)
+        self.root.geometry("1320x900")
+        self.root.minsize(1100, 720)
+        self.root.configure(bg="#eef2f7")
 
         self.adb = self.find_adb()
         self.scrcpy = self.find_scrcpy()
@@ -112,7 +118,7 @@ class ProfessionalPhoneController:
         self.device_config_file = BASE_DIR / "dispositivos.json"
         self.search_record_dir = BASE_DIR / "registros_busqueda"
         self.sequence_dir = BASE_DIR / "secuencias"
-        self.templates_dir = BASE_DIR / "templates"
+        self.templates_dir = RESOURCE_DIR / "templates"
         self.templates_dir.mkdir(exist_ok=True)
 
         self.device_aliases = self.load_device_aliases()
@@ -145,15 +151,39 @@ class ProfessionalPhoneController:
             style.theme_use("clam")
         except Exception:
             pass
-        style.configure("TButton", font=("Segoe UI", 9, "bold"), padding=6, relief="flat")
+        style.configure("TFrame", background="#f7f9fc")
+        style.configure("TLabel", background="#f7f9fc", foreground="#25324a", font=("Segoe UI", 9))
+        style.configure("TButton", font=("Segoe UI", 9, "bold"), padding=(10, 7), relief="flat")
+        style.configure("TEntry", padding=5)
+        style.configure("TCombobox", padding=4)
+        style.configure("TCheckbutton", background="#f7f9fc", foreground="#25324a", font=("Segoe UI", 9))
+        style.configure("TLabelframe", background="#f7f9fc", bordercolor="#d8e0ec", relief="solid")
+        style.configure("TLabelframe.Label", background="#f7f9fc", foreground="#1d2b44", font=("Segoe UI", 9, "bold"))
+        style.configure("Treeview", background="white", fieldbackground="white", foreground="#25324a", rowheight=28, borderwidth=0)
+        style.configure("Treeview.Heading", background="#e8edf5", foreground="#25324a", font=("Segoe UI", 9, "bold"), padding=7)
+        style.map("Treeview", background=[("selected", "#dceaff")], foreground=[("selected", "#123f78")])
         style.configure("Primary.TButton", background="#1877f2", foreground="white")
         style.configure("Success.TButton", background="#42b72a", foreground="white")
         style.configure("Warning.TButton", background="#f0ad4e", foreground="white")
+        style.configure("Danger.TButton", background="#d64545", foreground="white")
+        style.layout("Sidebar.TNotebook", [("TNotebook.client", {"sticky": "nswe"})])
+        style.layout("Sidebar.TNotebook.Tab", [])
 
         self.devices = []
 
-        self.notebook = ttk.Notebook(self.root)
-        self.notebook.pack(fill="both", expand=True, padx=10, pady=10)
+        self.create_application_header()
+        self.create_console_widget()
+
+        self.workspace = tk.Frame(self.root, bg="#eef2f7")
+        self.workspace.pack(fill="both", expand=True, padx=12, pady=(0, 8))
+        self.sidebar = tk.Frame(self.workspace, bg="#17233a", width=228)
+        self.sidebar.pack(side="left", fill="y")
+        self.sidebar.pack_propagate(False)
+        self.content_panel = tk.Frame(self.workspace, bg="#f7f9fc", highlightthickness=1, highlightbackground="#d8e0ec")
+        self.content_panel.pack(side="left", fill="both", expand=True)
+
+        self.notebook = ttk.Notebook(self.content_panel, style="Sidebar.TNotebook")
+        self.notebook.pack(fill="both", expand=True, padx=12, pady=12)
 
         self.tab_general = ttk.Frame(self.notebook)
         self.tab_interaction = ttk.Frame(self.notebook)
@@ -165,15 +195,34 @@ class ProfessionalPhoneController:
         self.tab_advanced = ttk.Frame(self.notebook)
         self.tab_maintenance = ttk.Frame(self.notebook)
 
-        self.notebook.add(self.tab_general, text=" Control General ")
-        self.notebook.add(self.tab_interaction, text=" Interacciones FB Lite ")
-        self.notebook.add(self.tab_search, text=" Búsqueda (Escucha) ")
-        self.notebook.add(self.tab_sequence, text=" Secuencias de acciones ")
-        self.notebook.add(self.tab_vision, text=" Reacciones (OpenCV) ")
-        self.notebook.add(self.tab_human, text=" 🛡️ Modo Humano ")
-        self.notebook.add(self.tab_report, text=" 🚨 Reportes Masivos ")
-        self.notebook.add(self.tab_advanced, text=" 🚀 Auto-Invitación & Scraping ")
-        self.notebook.add(self.tab_maintenance, text=" 🧹 Mantenimiento & Live ")
+        self.notebook.add(self.tab_general, text="Dispositivos")
+        self.notebook.add(self.tab_interaction, text="Interacciones")
+        self.notebook.add(self.tab_search, text="Búsqueda")
+        self.notebook.add(self.tab_sequence, text="Secuencias")
+        self.notebook.add(self.tab_vision, text="Reacciones")
+        self.notebook.add(self.tab_human, text="Modo humano")
+        self.notebook.add(self.tab_report, text="Reportes")
+        self.notebook.add(self.tab_advanced, text="Automatización avanzada")
+        self.notebook.add(self.tab_maintenance, text="Mantenimiento")
+
+        self.navigation_pages = [
+            ("OPERACIÓN", [
+                ("Dispositivos", self.tab_general),
+                ("Interacciones", self.tab_interaction),
+                ("Búsqueda", self.tab_search),
+                ("Secuencias", self.tab_sequence),
+            ]),
+            ("AUTOMATIZACIÓN", [
+                ("Reacciones", self.tab_vision),
+                ("Modo humano", self.tab_human),
+                ("Reportes", self.tab_report),
+            ]),
+            ("HERRAMIENTAS", [
+                ("Automatización avanzada", self.tab_advanced),
+                ("Mantenimiento", self.tab_maintenance),
+            ]),
+        ]
+        self.create_sidebar_navigation()
 
         self.create_general_widgets()
         self.create_interaction_widgets()
@@ -184,10 +233,73 @@ class ProfessionalPhoneController:
         self.create_report_widgets()
         self.create_advanced_widgets()
         self.create_maintenance_widgets()
-        self.create_console_widget()
+        self.select_navigation_page(self.tab_general, "Dispositivos")
 
         self.refresh_devices_async()
         threading.Thread(target=self.auto_scan_worker, daemon=True).start()
+
+    def create_application_header(self):
+        header = tk.Frame(self.root, bg="#0f5fb8", height=78)
+        header.pack(fill="x")
+        header.pack_propagate(False)
+
+        title_box = tk.Frame(header, bg="#0f5fb8")
+        title_box.pack(side="left", fill="y", padx=20)
+        tk.Label(title_box, text="Panel Celulares V2", bg="#0f5fb8", fg="white",
+                 font=("Segoe UI", 16, "bold")).pack(anchor="w", pady=(11, 0))
+        self.current_page_var = tk.StringVar(value="Dispositivos")
+        tk.Label(title_box, textvariable=self.current_page_var, bg="#0f5fb8", fg="#cfe5ff",
+                 font=("Segoe UI", 9)).pack(anchor="w")
+
+        self.header_device_var = tk.StringVar(value="0 conectados  ·  0 seleccionados")
+        status = tk.Frame(header, bg="#0b4f9b", padx=14, pady=8)
+        status.pack(side="right", padx=20, pady=10)
+        tk.Label(status, text="ESTADO DE DISPOSITIVOS", bg="#0b4f9b", fg="#a9cff9",
+                 font=("Segoe UI", 8, "bold")).pack(anchor="e")
+        tk.Label(status, textvariable=self.header_device_var, bg="#0b4f9b", fg="white",
+                 font=("Segoe UI", 10, "bold")).pack(anchor="e")
+
+    def create_sidebar_navigation(self):
+        self.navigation_buttons = {}
+        tk.Label(self.sidebar, text="NAVEGACIÓN", bg="#17233a", fg="#91a4c3",
+                 font=("Segoe UI", 8, "bold")).pack(anchor="w", padx=18, pady=(18, 8))
+        for group, pages in self.navigation_pages:
+            tk.Label(self.sidebar, text=group, bg="#17233a", fg="#7186a9",
+                     font=("Segoe UI", 8, "bold")).pack(anchor="w", padx=18, pady=(12, 4))
+            for label, tab in pages:
+                button = tk.Button(
+                    self.sidebar,
+                    text=label,
+                    command=lambda current_tab=tab, current_label=label: self.select_navigation_page(current_tab, current_label),
+                    bg="#17233a",
+                    fg="#dce6f5",
+                    activebackground="#23426d",
+                    activeforeground="white",
+                    relief="flat",
+                    bd=0,
+                    anchor="w",
+                    padx=18,
+                    pady=9,
+                    font=("Segoe UI", 9, "bold"),
+                    cursor="hand2",
+                )
+                button.pack(fill="x", padx=8, pady=1)
+                self.navigation_buttons[str(tab)] = button
+
+        footer = tk.Label(self.sidebar, text="Multi-dispositivo", bg="#17233a", fg="#7186a9",
+                          font=("Segoe UI", 8))
+        footer.pack(side="bottom", anchor="w", padx=18, pady=16)
+
+    def select_navigation_page(self, tab, label):
+        self.notebook.select(tab)
+        self.current_page_var.set(label)
+        selected_key = str(tab)
+        for key, button in self.navigation_buttons.items():
+            is_selected = key == selected_key
+            button.configure(
+                bg="#1877f2" if is_selected else "#17233a",
+                fg="white" if is_selected else "#dce6f5",
+            )
 
     def auto_scan_worker(self):
         while not self.app_closing.is_set():
@@ -198,7 +310,7 @@ class ProfessionalPhoneController:
                     self.post_ui(self.refresh_devices_async)
 
     def find_adb(self):
-        tools_path = BASE_DIR / "herramientas"
+        tools_path = RESOURCE_DIR / "herramientas"
         if tools_path.exists():
             for root, dirs, files in os.walk(tools_path):
                 if "adb.exe" in files:
@@ -208,7 +320,7 @@ class ProfessionalPhoneController:
         return sys_adb if sys_adb else "adb"
 
     def find_scrcpy(self):
-        for candidate in (BASE_DIR / "herramientas").glob("**/scrcpy.exe"):
+        for candidate in (RESOURCE_DIR / "herramientas").glob("**/scrcpy.exe"):
             return str(candidate)
         return None
 
@@ -2093,10 +2205,35 @@ class ProfessionalPhoneController:
         self.sequence_status_var.set("Deteniendo secuencia...")
 
     def create_console_widget(self):
-        console_frame = ttk.LabelFrame(self.root, text=" Consola de Estado ", padding=10)
-        console_frame.pack(fill="both", expand=True, padx=15, pady=10)
-        self.console = scrolledtext.ScrolledText(console_frame, bg="#1e1e1e", fg="#00ff00", font=("Consolas", 9), insertbackground="white", height=8)
-        self.console.pack(fill="both", expand=True, padx=5, pady=5)
+        self.console_frame = tk.Frame(self.root, bg="#17233a", highlightthickness=0)
+        self.console_frame.pack(side="bottom", fill="x", padx=12, pady=(0, 10))
+        console_header = tk.Frame(self.console_frame, bg="#17233a", height=34)
+        console_header.pack(fill="x")
+        tk.Label(console_header, text="Registro de actividad", bg="#17233a", fg="white",
+                 font=("Segoe UI", 9, "bold")).pack(side="left", padx=12, pady=7)
+        self.console_visible = True
+        self.console_toggle_button = tk.Button(
+            console_header, text="Ocultar", command=self.toggle_console,
+            bg="#17233a", fg="#bcd0ea", activebackground="#23426d", activeforeground="white",
+            relief="flat", bd=0, font=("Segoe UI", 8, "bold"), cursor="hand2"
+        )
+        self.console_toggle_button.pack(side="right", padx=10)
+        self.console_body = tk.Frame(self.console_frame, bg="#101827")
+        self.console_body.pack(fill="x")
+        self.console = scrolledtext.ScrolledText(
+            self.console_body, bg="#101827", fg="#8ee6a8", font=("Consolas", 9),
+            insertbackground="white", height=5, relief="flat", bd=0
+        )
+        self.console.pack(fill="x", padx=10, pady=(3, 9))
+
+    def toggle_console(self):
+        if self.console_visible:
+            self.console_body.pack_forget()
+            self.console_toggle_button.configure(text="Mostrar")
+        else:
+            self.console_body.pack(fill="x")
+            self.console_toggle_button.configure(text="Ocultar")
+        self.console_visible = not self.console_visible
 
     def _drain_ui_queue(self):
         try:
@@ -2143,7 +2280,11 @@ class ProfessionalPhoneController:
         self.update_selection_label()
 
     def update_selection_label(self, _e=None):
-        self.lbl_selection.config(text=f"Seleccionados: {len(self.get_selected_devices())} de {len(self.devices)}")
+        selected = len(self.get_selected_devices())
+        connected = len(self.devices)
+        self.lbl_selection.config(text=f"Seleccionados: {selected} de {connected}")
+        if hasattr(self, "header_device_var"):
+            self.header_device_var.set(f"{connected} conectados  ·  {selected} seleccionados")
 
     def display_device_name(self, serial):
         return self.device_aliases.get(serial) or self.device_details.get(serial, {}).get("model") or serial
@@ -2621,7 +2762,7 @@ class ProfessionalPhoneController:
         screen = self.capture_device_screen(device)
         if screen is None:
             return []
-        script_path = BASE_DIR / "herramientas" / "ocr_windows.ps1"
+        script_path = RESOURCE_DIR / "herramientas" / "ocr_windows.ps1"
         if not script_path.exists():
             return []
         temp_path = None
@@ -4749,6 +4890,11 @@ class ProfessionalPhoneController:
 if __name__ == "__main__":
     try:
         if not acquire_single_instance(): sys.exit(0)
+        if getattr(sys, "frozen", False):
+            from license_guard import run_startup_gate
+
+            if not run_startup_gate():
+                sys.exit(0)
         root = tk.Tk()
         app = ProfessionalPhoneController(root)
         root.mainloop()

@@ -17,9 +17,56 @@ Esta bitácora registra el estado base del proyecto y todos los cambios que se r
 
 ## Cambios en curso
 
-Ninguno.
+- Ninguno.
 
 ## Cambios completados
+
+### CHG-20261112-1012 — Ejecutable protegido, pantalla de inicio y licencia por equipo/USB
+
+- Fecha y hora de inicio: 2026-11-12 10:12:58 (America/Mexico_City)
+- Estado: Completado localmente el 2026-11-12 13:21:25 (America/Mexico_City)
+- Tipo: Distribución y control de acceso solicitados por el cliente
+- Autoría: Se conserva la autoría del proyecto original; el trabajo se limita a empaquetar y proteger la distribución solicitada.
+- Objetivos:
+  - Generar un ejecutable portable sin archivos fuente `.py` en la carpeta entregable.
+  - Mostrar una pantalla de inicio antes del panel.
+  - Solicitar una contraseña dinámica basada en la fecha local al activar y cada 20 días.
+  - Vincular la licencia al equipo si se ejecuta desde disco fijo o a la unidad USB si se ejecuta desde una unidad removible.
+  - Solicitar una nueva activación cuando el paquete se copie a otro equipo o a otra USB.
+  - Mejorar la organización visual del panel sin retirar ni alterar funciones existentes.
+- Diseño solicitado durante la implementación:
+  - Sustituir la fila saturada de pestañas por una navegación lateral agrupada.
+  - Incorporar encabezado con página actual y resumen de teléfonos.
+  - Unificar tipografía, colores, espaciado, tablas, botones y campos.
+  - Convertir la consola global en un panel compacto que pueda mostrarse u ocultarse.
+- Seguridad prevista: licencia firmada, detección de retroceso de fecha, contraseña no almacenada y huella SHA-256; no se registrarán claves ni huellas completas en la bitácora.
+- Limitación explícita: Un ejecutable local puede dificultar la recuperación del código, pero no puede garantizar que sea técnicamente imposible analizarlo o modificarlo.
+- Distribución: Las herramientas ADB, scrcpy, OCR y plantillas se incluirán dentro del ejecutable; los datos operativos permanecerán junto al ejecutable.
+- Archivos previstos: `panel.py`, módulo de licencia, script de construcción, `.gitignore`, `LEEME.txt` y esta bitácora.
+- Riesgos: falsos positivos de antivirus por ejecutable sin firma, tamaño del paquete, cambio de hardware/volumen y manipulación del reloj local.
+- Referencia de rollback: commit `4459fa7` de la rama `integracion`.
+- Rama Git: `integracion`.
+- Implementación:
+  - `license_guard.py` incorpora una licencia local firmada, renovación cada 20 días, detección de retroceso de fecha y validación sin almacenar la contraseña acordada.
+  - La huella de equipo combina identificadores locales; la huella USB usa el número de volumen y capacidad, sin depender de la letra asignada por Windows.
+  - La pantalla de inicio informa si la vinculación corresponde al equipo o a una USB y permite cancelar sin crear licencia.
+  - `Construir Ejecutable.ps1` genera una distribución de un solo archivo con PyInstaller e incluye ADB, scrcpy, OCR y plantillas.
+  - El panel reconoce correctamente las rutas internas del ejecutable y conserva los datos operativos fuera del paquete.
+  - La interfaz se reorganizó con encabezado de estado, navegación lateral agrupada, página activa resaltada, estilos uniformes y un registro de actividad compacto y plegable.
+  - Se mantienen las nueve secciones y sus controles; el cambio de diseño no retira acciones existentes.
+  - `release` contiene sólo `PanelCelularesV2.exe` y `SHA256.txt`; las carpetas de construcción y entrega quedan excluidas de Git.
+- Pruebas:
+  - Compilación de `panel.py` y `license_guard.py`, `git diff --check` y pruebas internas de navegación/consola: correctos.
+  - Activación válida, contraseña incorrecta, vigencia hasta el día 19, renovación exacta el día 20, firma alterada y archivo sin contraseña almacenada: correctos.
+  - Revisión visual de Dispositivos y Secuencias: navegación lateral, encabezado, selección y controles sin recortes relevantes.
+  - Arranque del ejecutable final: correcto; se mostró la activación compilada y se canceló sin crear licencia.
+  - Comprobación de entrega: no hay `.py`, `.pyc`, `.ps1` ni `.bat` visibles; ADB, scrcpy y plantillas están incluidos internamente.
+  - Búsqueda binaria del prefijo legible de la contraseña: sin coincidencias.
+  - SHA-256 final: `64397D95308DB79BA7CA12824EDFA9E67B872F693E0B17DE48ADE8E1E1E1F068`.
+  - Firma Authenticode: `NotSigned`; Windows o el antivirus pueden advertir sobre un editor desconocido.
+- Entrega local: `release/PanelCelularesV2.exe` (85,516,852 bytes) y `release/SHA256.txt`.
+- Limitación verificada: el empaquetado evita entregar fuentes visibles, pero una protección completamente local no garantiza que el ejecutable sea imposible de analizar o alterar.
+- Commit resultante: El commit de la rama `integracion` que contiene esta entrada.
 
 ### CHG-20261112-0847 — Tiempo de espera en saltos de 500 ms y secuencias paralelas
 

@@ -17,3 +17,6 @@ herramientas/
 # Copias y diagnósticos locales
 _rollback/
 diagnostico.txt
+build/
+dist/
+release/
