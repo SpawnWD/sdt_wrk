@@ -1,4 +1,4 @@
-# Bitácora de cambios — Panel Celulares V2
+# Bitácora de cambios — Administración de móviles (移动设备管理)
 
 Esta bitácora registra el estado base del proyecto y todos los cambios que se realicen a partir de este momento. Su objetivo es mantener trazabilidad, facilitar diagnósticos y permitir una reversión controlada cuando sea necesario.
 
@@ -20,6 +20,30 @@ Esta bitácora registra el estado base del proyecto y todos los cambios que se r
 - Ninguno.
 
 ## Cambios completados
+
+### CHG-20261112-1323 — Cambio de nombre bilingüe y versión visible
+
+- Fecha y hora de inicio: 2026-11-12 13:23:24 (America/Mexico_City)
+- Estado: Completado localmente el 2026-11-12 13:26:11 (America/Mexico_City)
+- Tipo: Identidad visual y distribución solicitadas por el cliente
+- Objetivo: Cambiar el nombre visible a `Administración de móviles (移动设备管理)` y mostrar `版本 1.88` en el extremo inferior derecho.
+- Alcance: títulos del panel y activación, encabezado, pie de página, nombre del ejecutable, constructor, documentación y bitácora.
+- Compatibilidad: no se cambiaron funciones, secuencias, licencia, huella del equipo ni comportamiento de automatización.
+- Riesgo: referencias antiguas al nombre del ejecutable en accesos directos o instrucciones externas.
+- Referencia de rollback: commit `79e19e5` de la rama `integracion`.
+- Rama Git: `integracion`.
+- Implementación:
+  - El título de la ventana, el encabezado principal y la pantalla de activación muestran el nombre bilingüe solicitado.
+  - Se agregó un pie permanente en el extremo inferior derecho con `版本 1.88`.
+  - El ejecutable pasó a llamarse `AdministracionDeMoviles.exe` y el constructor genera el SHA-256 con ese nombre.
+  - Se conservan internamente la ruta de licencia y el mutex anteriores para no romper compatibilidad operativa.
+- Pruebas:
+  - Compilación de `panel.py` y `license_guard.py`, aserciones de textos y `git diff --check`: correctos.
+  - Revisión visual: caracteres chinos correctos en ventana y encabezado; pie completo con escala de Windows.
+  - Ejecutable compilado: pantalla de activación bilingüe abierta correctamente y cancelada sin crear una licencia nueva.
+  - Entrega: `AdministracionDeMoviles.exe` (85,516,620 bytes) y `SHA256.txt`.
+  - SHA-256: `AD68675EC75FB5053F4D4B2C9EF7CA3F91541952798E42908EED7BAFD0837A09`.
+- Commit resultante: El commit de la rama `integracion` que contiene esta entrada.
 
 ### CHG-20261112-1012 — Ejecutable protegido, pantalla de inicio y licencia por equipo/USB
 

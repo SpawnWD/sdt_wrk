@@ -33,7 +33,7 @@ python -m PyInstaller `
     --clean `
     --onefile `
     --windowed `
-    --name "PanelCelularesV2" `
+    --name "AdministracionDeMoviles" `
     --distpath $releasePath `
     --workpath $buildPath `
     --specpath $buildPath `
@@ -44,13 +44,13 @@ python -m PyInstaller `
 
 if ($LASTEXITCODE -ne 0) { throw "PyInstaller terminó con código $LASTEXITCODE" }
 
-$executable = Join-Path $releasePath "PanelCelularesV2.exe"
+$executable = Join-Path $releasePath "AdministracionDeMoviles.exe"
 if (-not (Test-Path -LiteralPath $executable -PathType Leaf)) {
     throw "No se generó el ejecutable esperado."
 }
 
 $hash = (Get-FileHash -LiteralPath $executable -Algorithm SHA256).Hash
-Set-Content -LiteralPath (Join-Path $releasePath "SHA256.txt") -Encoding UTF8 -Value "PanelCelularesV2.exe  SHA256  $hash"
+Set-Content -LiteralPath (Join-Path $releasePath "SHA256.txt") -Encoding UTF8 -Value "AdministracionDeMoviles.exe  SHA256  $hash"
 
 Write-Host "Ejecutable generado: $executable"
 Write-Host "SHA256: $hash"

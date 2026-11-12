@@ -87,7 +87,7 @@ class ProfessionalPhoneController:
 
     def __init__(self, root):
         self.root = root
-        self.root.title("Panel de Control Multi-Dispositivo - FB Lite & Modo Agencia")
+        self.root.title("Administración de móviles (移动设备管理)")
         self.root.geometry("1320x900")
         self.root.minsize(1100, 720)
         self.root.configure(bg="#eef2f7")
@@ -172,6 +172,7 @@ class ProfessionalPhoneController:
         self.devices = []
 
         self.create_application_header()
+        self.create_application_footer()
         self.create_console_widget()
 
         self.workspace = tk.Frame(self.root, bg="#eef2f7")
@@ -245,8 +246,8 @@ class ProfessionalPhoneController:
 
         title_box = tk.Frame(header, bg="#0f5fb8")
         title_box.pack(side="left", fill="y", padx=20)
-        tk.Label(title_box, text="Panel Celulares V2", bg="#0f5fb8", fg="white",
-                 font=("Segoe UI", 16, "bold")).pack(anchor="w", pady=(11, 0))
+        tk.Label(title_box, text="Administración de móviles (移动设备管理)", bg="#0f5fb8", fg="white",
+                 font=("Microsoft YaHei UI", 15, "bold")).pack(anchor="w", pady=(11, 0))
         self.current_page_var = tk.StringVar(value="Dispositivos")
         tk.Label(title_box, textvariable=self.current_page_var, bg="#0f5fb8", fg="#cfe5ff",
                  font=("Segoe UI", 9)).pack(anchor="w")
@@ -258,6 +259,18 @@ class ProfessionalPhoneController:
                  font=("Segoe UI", 8, "bold")).pack(anchor="e")
         tk.Label(status, textvariable=self.header_device_var, bg="#0b4f9b", fg="white",
                  font=("Segoe UI", 10, "bold")).pack(anchor="e")
+
+    def create_application_footer(self):
+        footer = tk.Frame(self.root, bg="#e3e9f2", height=38)
+        footer.pack(side="bottom", fill="x")
+        footer.pack_propagate(False)
+        tk.Label(
+            footer,
+            text="版本 1.88",
+            bg="#e3e9f2",
+            fg="#52647d",
+            font=("Microsoft YaHei UI", 9, "bold"),
+        ).pack(side="right", padx=16, pady=7)
 
     def create_sidebar_navigation(self):
         self.navigation_buttons = {}

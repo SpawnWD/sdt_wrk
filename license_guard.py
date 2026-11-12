@@ -210,7 +210,7 @@ class LicenseManager:
 def run_startup_gate():
     manager = LicenseManager()
     root = tk.Tk()
-    root.title("Panel Celulares V2")
+    root.title("Administración de móviles (移动设备管理)")
     root.resizable(False, False)
     root.configure(bg="#eef3f8")
     width, height = 590, 370
@@ -223,10 +223,10 @@ def run_startup_gate():
     header.pack_propagate(False)
     tk.Label(
         header,
-        text="Panel Celulares V2",
+        text="Administración de móviles (移动设备管理)",
         bg="#145ea8",
         fg="white",
-        font=("Segoe UI", 23, "bold"),
+        font=("Microsoft YaHei UI", 18, "bold"),
     ).pack(pady=(22, 2))
     tk.Label(
         header,

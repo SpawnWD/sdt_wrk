@@ -104,7 +104,7 @@ SECUENCIAS DE ACCIONES
 
 VERSION EJECUTABLE Y LICENCIA
 - Para reconstruir la distribución instala PyInstaller con `python -m pip install pyinstaller` y ejecuta `Construir Ejecutable.ps1` desde PowerShell.
-- La carpeta `release` generada por `Construir Ejecutable.ps1` contiene `PanelCelularesV2.exe` y su archivo de comprobación SHA-256; no contiene archivos fuente `.py`.
+- La carpeta `release` generada por `Construir Ejecutable.ps1` contiene `AdministracionDeMoviles.exe` y su archivo de comprobación SHA-256; no contiene archivos fuente `.py`.
 - El ejecutable muestra una pantalla de inicio y valida la licencia antes de abrir el panel.
 - La activación se renueva cada 20 días usando la contraseña dinámica acordada, calculada con la fecha local del día de activación. La contraseña no se guarda en el equipo ni en la licencia.
 - Si el ejecutable está en un disco fijo, la licencia se vincula al equipo. Si se ejecuta desde una unidad que Windows identifica como removible, se vincula al número de volumen de esa USB.
@@ -114,6 +114,7 @@ VERSION EJECUTABLE Y LICENCIA
 - Al no contar con un certificado de firma de código, Windows o el antivirus pueden mostrar una advertencia sobre un ejecutable nuevo; el archivo `SHA256.txt` permite comprobar que no cambió después de construirlo.
 
 ORGANIZACIÓN DE LA INTERFAZ
+- El nombre visible es `Administración de móviles (移动设备管理)` y el pie inferior derecho muestra `版本 1.88`.
 - El encabezado muestra la sección actual y el número de teléfonos conectados y seleccionados.
 - La navegación lateral agrupa las nueve secciones en Operación, Automatización y Herramientas; el botón azul indica la vista activa.
 - El registro de actividad permanece en la parte inferior y puede mostrarse u ocultarse para aprovechar mejor el espacio de trabajo.
