@@ -1,11 +1,13 @@
 $ErrorActionPreference = "Stop"
 
 $projectRoot = (Resolve-Path -LiteralPath $PSScriptRoot).Path
-$buildPath = Join-Path $projectRoot "build"
-$releasePath = Join-Path $projectRoot "release"
+$buildPath = Join-Path $projectRoot "build_1.88"
+$releasePath = Join-Path $projectRoot "release_1.88"
 $panelPath = Join-Path $projectRoot "panel.py"
 $templatesPath = Join-Path $projectRoot "templates"
 $toolsPath = Join-Path $projectRoot "herramientas"
+$assetsPath = Join-Path $projectRoot "assets"
+$iconPath = Join-Path $assetsPath "app_icon.ico"
 
 foreach ($target in @($buildPath, $releasePath)) {
     $fullTarget = [IO.Path]::GetFullPath($target)
@@ -20,6 +22,7 @@ foreach ($target in @($buildPath, $releasePath)) {
 if (-not (Test-Path -LiteralPath $panelPath -PathType Leaf)) { throw "No se encontró panel.py" }
 if (-not (Test-Path -LiteralPath $templatesPath -PathType Container)) { throw "No se encontró templates" }
 if (-not (Test-Path -LiteralPath $toolsPath -PathType Container)) { throw "No se encontró herramientas" }
+if (-not (Test-Path -LiteralPath $iconPath -PathType Leaf)) { throw "No se encontró assets/app_icon.ico" }
 
 New-Item -ItemType Directory -Path $buildPath, $releasePath -Force | Out-Null
 
@@ -34,11 +37,13 @@ python -m PyInstaller `
     --onefile `
     --windowed `
     --name "AdministracionDeMoviles" `
+    --icon $iconPath `
     --distpath $releasePath `
     --workpath $buildPath `
     --specpath $buildPath `
     --add-data "$templatesPath;templates" `
     --add-data "$toolsPath;herramientas" `
+    --add-data "$assetsPath;assets" `
     --hidden-import "license_guard" `
     $panelPath
 

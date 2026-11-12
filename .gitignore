@@ -20,3 +20,5 @@ diagnostico.txt
 build/
 dist/
 release/
+build_*/
+release_*/

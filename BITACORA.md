@@ -21,6 +21,43 @@ Esta bitácora registra el estado base del proyecto y todos los cambios que se r
 
 ## Cambios completados
 
+### CHG-20261112-1450 — Enlace y acciones opcionales en publicaciones sin texto accesible
+
+- Fecha y hora de inicio: 2026-11-12 14:50:41 (America/Mexico_City)
+- Estado: Completado localmente el 2026-11-12 15:01:44 (America/Mexico_City)
+- Tipo: Corrección funcional y recurso visual solicitados por el cliente
+- Objetivos:
+  - Reconocer publicaciones de Facebook Lite que muestran fecha y contenido visualmente pero no exponen texto en accesibilidad.
+  - Abrir la publicación correcta y obtener su enlace cuando `Guardar enlace` esté seleccionado.
+  - Verificar que `Me gusta` y `Comentario` se ejecuten únicamente cuando sus casillas estén seleccionadas.
+  - Regresar desde publicaciones simples o anidadas hasta el feed principal antes de reanudar el scroll.
+  - Incorporar un icono de aplicación con un teléfono caricaturizado, ojos y sombrero cónico, visible en ventana, barra de tareas y ejecutable.
+- Diagnóstico inicial: la publicación visible de Información Sierra Norte no era publicidad y mostraba `22 h`, pero el encabezado accesible medía 71.4 % del ancho y el detector geométrico sólo aceptaba hasta 70 %; además, Facebook Lite exponía el bloque como vistas sin texto.
+- Referencia de rollback: commit `938f6b1` de la rama `integracion`.
+- Rama Git: `integracion`.
+- Implementación:
+  - El detector geométrico acepta encabezados válidos de hasta 76 % del ancho y reconoció la fecha real en `(221, 319)`.
+  - Después de pulsar la fecha, el panel confirma el encabezado o editor propio de una publicación y reintenta una sola vez; sin confirmación no obtiene enlaces ni pulsa acciones.
+  - La captura existente de `Más opciones` y `Copiar enlace` se conservó y se comprobó correctamente en la publicación real.
+  - La selección de acciones se aisló en una función que ejecuta exclusivamente `Me gusta`, `Comentario`, ambas o ninguna según los checkboxes.
+  - Tras una publicación simple o anidada, el panel repite Atrás hasta cuatro veces mientras siga detectando una vista de publicación. El scroll sólo se reanuda cuando el feed queda confirmado.
+  - Se añadió un identificador de aplicación de Windows, icono de ventana y recursos nativos PNG/ICO dentro de `assets`.
+  - El icono fue generado con la herramienta integrada de imágenes: teléfono azul amistoso, ojos curvos de caricatura, sombrero cónico de paja, fondo transparente y sin texto.
+  - El constructor incorpora el icono al `.exe` y genera esta actualización en `release_1.88`, sin cerrar ni reemplazar la versión anterior que permanece en uso.
+- Pruebas:
+  - Compilación, `git diff --check`, icono Tk y recursos: correctos.
+  - Árbol real de Facebook Lite: fecha geométrica detectada en el punto esperado.
+  - Captura real del enlace: correcta; no se registró el URL en la bitácora.
+  - Detectores visuales sin toque: Me gusta en `(105, 1017)` con puntuación `0.95`; Comentario en `(341, 1017)` con puntuación `1.00`.
+  - Las cuatro combinaciones de checkboxes fueron simuladas y sólo invocaron las acciones seleccionadas.
+  - Regreso anidado simulado con dos niveles: correcto; regreso real desde la publicación al feed: confirmado.
+  - No se dio Me gusta ni se publicó comentario durante las pruebas.
+  - Icono asociado extraído del ejecutable y revisado en tamaño pequeño; icono de ventana comprobado visualmente.
+  - Constructor oficial ejecutado correctamente sin interrumpir el panel anterior.
+- Entrega: `release_1.88/AdministracionDeMoviles.exe` (87,060,919 bytes) y `SHA256.txt`.
+- SHA-256: `7C254DB3A8E0B6CEC9F5443B5A76C1BA4B919074B8A8BF4735BB0A9B75E92894`.
+- Commit resultante: El commit de la rama `integracion` que contiene esta entrada.
+
 ### CHG-20261112-1323 — Cambio de nombre bilingüe y versión visible
 
 - Fecha y hora de inicio: 2026-11-12 13:23:24 (America/Mexico_City)

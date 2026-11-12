@@ -36,6 +36,23 @@ def executable_directory():
     return Path(__file__).resolve().parent
 
 
+def resource_directory():
+    return Path(getattr(sys, "_MEIPASS", Path(__file__).resolve().parent)).resolve()
+
+
+def _set_window_icon(root):
+    icon_png = resource_directory() / "assets" / "app_icon.png"
+    icon_ico = resource_directory() / "assets" / "app_icon.ico"
+    try:
+        if icon_png.exists():
+            root._app_icon = tk.PhotoImage(file=str(icon_png))
+            root.iconphoto(True, root._app_icon)
+        if os.name == "nt" and icon_ico.exists():
+            root.iconbitmap(default=str(icon_ico))
+    except tk.TclError:
+        root._app_icon = None
+
+
 def _drive_root(path):
     anchor = Path(path).resolve().anchor
     return anchor if anchor else os.path.abspath(os.sep)
@@ -211,6 +228,7 @@ def run_startup_gate():
     manager = LicenseManager()
     root = tk.Tk()
     root.title("Administración de móviles (移动设备管理)")
+    _set_window_icon(root)
     root.resizable(False, False)
     root.configure(bg="#eef3f8")
     width, height = 590, 370

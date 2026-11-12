@@ -58,6 +58,16 @@ def release_single_instance():
             pass
         INSTANCE_MUTEX = None
 
+def set_windows_app_id():
+    if os.name != "nt":
+        return
+    try:
+        ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID(
+            "AdministracionDeMoviles.Version1.88"
+        )
+    except Exception:
+        pass
+
 try:
     import cv2
     import numpy as np
@@ -91,6 +101,7 @@ class ProfessionalPhoneController:
         self.root.geometry("1320x900")
         self.root.minsize(1100, 720)
         self.root.configure(bg="#eef2f7")
+        self.configure_application_icon()
 
         self.adb = self.find_adb()
         self.scrcpy = self.find_scrcpy()
@@ -238,6 +249,18 @@ class ProfessionalPhoneController:
 
         self.refresh_devices_async()
         threading.Thread(target=self.auto_scan_worker, daemon=True).start()
+
+    def configure_application_icon(self):
+        icon_png = RESOURCE_DIR / "assets" / "app_icon.png"
+        icon_ico = RESOURCE_DIR / "assets" / "app_icon.ico"
+        try:
+            if icon_png.exists():
+                self.app_icon = tk.PhotoImage(file=str(icon_png))
+                self.root.iconphoto(True, self.app_icon)
+            if os.name == "nt" and icon_ico.exists():
+                self.root.iconbitmap(default=str(icon_ico))
+        except tk.TclError:
+            self.app_icon = None
 
     def create_application_header(self):
         header = tk.Frame(self.root, bg="#0f5fb8", height=78)
@@ -2847,7 +2870,7 @@ class ProfessionalPhoneController:
             box_width, box_height = right - left, bottom - top
             if not width * 0.12 <= left <= width * 0.25:
                 continue
-            if not width * 0.45 <= box_width <= width * 0.70:
+            if not width * 0.45 <= box_width <= width * 0.76:
                 continue
             if not height * 0.045 <= box_height <= height * 0.16:
                 continue
@@ -3925,25 +3948,92 @@ class ProfessionalPhoneController:
         self.log(f"[{device}] El comentario no se confirmó después del reintento; se continuará con la siguiente publicación.")
         return "not_confirmed_after_retry"
 
-    def return_to_feed_after_post(self, device):
-        self.run_on_device(device, ["shell", "input", "keyevent", "4"])
-        if self.wait_or_cancel(1.1, self.search_stop_event):
-            return
-        size = self.get_device_screen_size(device) or (1080, 1920)
-        screen_height = size[1]
-        hierarchy = self.get_android_hierarchy(device)
-        records = self.accessibility_text_records(hierarchy)
-        top_text = " ".join(
-            record["text"] for record in records if record["bounds"][1] < screen_height * 0.18
-        ) if records else ""
-        if "facebook" not in self.normalize_search_text(top_text):
-            ocr_records = self.windows_ocr_records(device)
-            top_text = " ".join(
-                record["text"] for record in ocr_records if record["bounds"][1] < screen_height * 0.18
+    def confirm_open_post(self, device, screen_size, attempts=3, delay=0.55):
+        """Confirma que Facebook está en una publicación antes de ejecutar acciones."""
+        for attempt in range(max(1, attempts)):
+            hierarchy = self.get_android_hierarchy(device)
+            records = self.accessibility_text_records(hierarchy)
+            if self.is_open_post_view(records, screen_size):
+                return True
+            records.extend(self.windows_ocr_records(device))
+            if self.is_open_post_view(records, screen_size):
+                return True
+            if attempt + 1 < attempts and self.wait_or_cancel(delay, self.search_stop_event):
+                return False
+        return False
+
+    def open_search_match_post(self, device, snapshot, screen_size):
+        point = snapshot["timestamp_point"]
+        self.log(
+            f"[{device}] Coincidencia asociada a fecha/hora '{snapshot['timestamp_text']}' "
+            f"por {snapshot['source']}; abriendo en {point}."
+        )
+        for attempt in range(2):
+            ok, detail = self.run_on_device(
+                device, ["shell", "input", "tap", str(point[0]), str(point[1])], timeout=15
             )
-        if "facebook" not in self.normalize_search_text(top_text):
+            if not ok:
+                self.log(f"[{device}] No se pudo abrir la publicación coincidente: {detail}")
+                return False
+            if self.wait_or_cancel(1.5 if attempt == 0 else 1.0, self.search_stop_event):
+                return False
+            if self.confirm_open_post(device, screen_size, attempts=2):
+                self.log(f"[{device}] Publicación coincidente abierta y confirmada.")
+                return True
+            if attempt == 0:
+                self.log(f"[{device}] El primer toque no abrió la publicación; se reintentará una vez.")
+        self.log(f"[{device}] No se confirmó la apertura; no se obtendrá enlace ni se ejecutarán acciones.")
+        return False
+
+    def perform_selected_search_actions(
+        self,
+        device,
+        like_on_match,
+        comment_on_match,
+        comment_text,
+        like_min,
+        like_max,
+    ):
+        """Ejecuta exclusivamente las acciones marcadas en la pestaña Búsqueda."""
+        like_result = None
+        comment_result = None
+        if not like_on_match and not comment_on_match:
+            return like_result, comment_result
+        chosen_wait = random.randint(like_min, like_max)
+        selected = "Me gusta y Comentario" if like_on_match and comment_on_match else (
+            "Me gusta" if like_on_match else "Comentario"
+        )
+        self.log(f"[{device}] Acciones seleccionadas: {selected}; espera previa {chosen_wait} s.")
+        self.post_ui(
+            lambda d=device, s=chosen_wait: self.search_status_var.set(
+                f"Publicación abierta en {d}; acciones en {s} s. Pulsa Detener para cancelar."
+            )
+        )
+        if self.wait_or_cancel(chosen_wait, self.search_stop_event):
+            return "cancelled" if like_on_match else None, "cancelled" if comment_on_match else None
+        if like_on_match:
+            like_result = self.perform_search_post_like(device)
+        if comment_on_match and not self.search_stop_event.is_set():
+            comment_result = self.perform_search_post_comment(
+                device, self.parse_spintax(comment_text)
+            )
+        return like_result, comment_result
+
+    def return_to_feed_after_post(self, device):
+        size = self.get_device_screen_size(device) or (1080, 1920)
+        for depth in range(4):
+            if not self.confirm_open_post(device, size, attempts=1):
+                self.log(f"[{device}] Regreso al feed confirmado; se continuará el scroll.")
+                return True
             self.run_on_device(device, ["shell", "input", "keyevent", "4"])
-            self.wait_or_cancel(1.0, self.search_stop_event)
+            if self.wait_or_cancel(1.0, self.search_stop_event):
+                return False
+            self.log(f"[{device}] Regreso {depth + 1}: comprobando si la publicación era anidada.")
+        if not self.confirm_open_post(device, size, attempts=1):
+            self.log(f"[{device}] Regreso al feed confirmado; se continuará el scroll.")
+            return True
+        self.log(f"[{device}] No se confirmó el feed después de cuatro regresos; se omite el siguiente scroll.")
+        return False
 
     def keyword_search_worker(
         self,
@@ -3963,6 +4053,7 @@ class ProfessionalPhoneController:
         seen = set()
         found_count = 0
         ad_guard = {device: 0 for device in devices}
+        scroll_ready = {device: True for device in devices}
         while not self.search_stop_event.is_set() and (continuous or step < max_scrolls):
             stop_after_match = False
             for dev in devices:
@@ -3980,7 +4071,7 @@ class ProfessionalPhoneController:
                             f"[{dev}] Facebook abrió una publicación durante el scroll sin coincidencia validada; "
                             "se regresa al feed sin ejecutar acciones."
                         )
-                        self.run_on_device(dev, ["shell", "input", "keyevent", "4"])
+                        scroll_ready[dev] = self.return_to_feed_after_post(dev)
                         ad_guard[dev] = 2
                         self.wait_or_cancel(1.2, self.search_stop_event)
                         continue
@@ -4015,37 +4106,27 @@ class ProfessionalPhoneController:
                     like_result = None
                     comment_result = None
                     if should_open_post:
-                        point = snapshot["timestamp_point"]
-                        self.log(
-                            f"[{dev}] Coincidencia asociada a fecha/hora '{snapshot['timestamp_text']}' "
-                            f"por {snapshot['source']}; abriendo en {point}."
-                        )
-                        ok, detail = self.run_on_device(
-                            dev, ["shell", "input", "tap", str(point[0]), str(point[1])], timeout=15
-                        )
-                        if not ok:
-                            self.log(f"[{dev}] No se pudo abrir la publicación coincidente: {detail}")
+                        if not self.open_search_match_post(dev, snapshot, size):
+                            seen.discard(fingerprint)
                             continue
-                        if self.wait_or_cancel(1.8, self.search_stop_event):
-                            break
                         if save_link_on_match:
                             post_url = self.capture_open_post_link(dev, size)
                             record_path, link_added = self.save_search_link_record(dev, snapshot, post_url)
                         if like_on_match or comment_on_match:
-                            chosen_wait = random.randint(like_min, like_max)
-                            self.post_ui(
-                                lambda d=dev, s=chosen_wait: self.search_status_var.set(
-                                    f"Publicación abierta en {d}; acciones en {s} s. Pulsa Detener para cancelar."
+                            if self.confirm_open_post(dev, size, attempts=2):
+                                like_result, comment_result = self.perform_selected_search_actions(
+                                    dev,
+                                    like_on_match,
+                                    comment_on_match,
+                                    comment_text,
+                                    like_min,
+                                    like_max,
                                 )
-                            )
-                            if self.wait_or_cancel(chosen_wait, self.search_stop_event):
-                                break
-                        if like_on_match:
-                            like_result = self.perform_search_post_like(dev)
-                        if comment_on_match and not self.search_stop_event.is_set():
-                            comment_result = self.perform_search_post_comment(
-                                dev, self.parse_spintax(comment_text)
-                            )
+                            else:
+                                self.log(
+                                    f"[{dev}] Después de obtener el enlace ya no se confirmó la publicación; "
+                                    "se omiten Me gusta y Comentario."
+                                )
                     else:
                         self.log(
                             f"[{dev}] Coincidencia asociada a fecha/hora '{snapshot['timestamp_text']}' "
@@ -4090,7 +4171,10 @@ class ProfessionalPhoneController:
                             "se saldrá de la publicación y continuará la búsqueda."
                         )
                     if should_open_post:
-                        self.return_to_feed_after_post(dev)
+                        returned_to_feed = self.return_to_feed_after_post(dev)
+                        scroll_ready[dev] = returned_to_feed
+                        if not returned_to_feed:
+                            ad_guard[dev] = 2
                     if not continuous:
                         stop_after_match = True
                         break
@@ -4098,7 +4182,7 @@ class ProfessionalPhoneController:
             if stop_after_match or self.search_stop_event.is_set():
                 break
             for dev in devices:
-                if not self.search_stop_event.is_set():
+                if not self.search_stop_event.is_set() and scroll_ready.get(dev, True):
                     self.scroll_device_once_random(dev)
             step += 1
             if self.search_stop_event.wait(2.0):
@@ -4903,6 +4987,7 @@ class ProfessionalPhoneController:
 if __name__ == "__main__":
     try:
         if not acquire_single_instance(): sys.exit(0)
+        set_windows_app_id()
         if getattr(sys, "frozen", False):
             from license_guard import run_startup_gate
 
