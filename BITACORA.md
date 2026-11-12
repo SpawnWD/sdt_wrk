@@ -21,6 +21,32 @@ Ninguno.
 
 ## Cambios completados
 
+### CHG-20261112-0825 — Acción para ocultar el teclado
+
+- Fecha y hora de inicio: 2026-11-12 08:25:56 (America/Mexico_City)
+- Estado: Completado localmente el 2026-11-12 08:27:06 (America/Mexico_City)
+- Tipo: Funcionalidad solicitada por el cliente
+- Autoría: Se conserva la autoría del proyecto original; el ajuste se limita al constructor de tareas solicitado.
+- Objetivo: Agregar una acción independiente que cierre el teclado después de invocarlo, sin abandonar accidentalmente la pantalla cuando el teclado ya esté oculto.
+- Estrategia: Comprobar el estado del teclado mediante Android y enviar Atrás únicamente cuando se confirme que está visible.
+- Alcance: `panel.py`, `LEEME.txt` y esta bitácora.
+- Riesgos: diferencias de diagnóstico entre versiones y fabricantes de Android.
+- Referencia de rollback: commit `77bace5` de la rama `integracion`.
+- Rama Git: `integracion`.
+- Implementación:
+  - Se agregó `Ocultar teclado` al catálogo de Secuencias de acciones.
+  - La acción consulta `dumpsys input_method` y reconoce los indicadores habituales de distintas versiones de Android.
+  - Si el diagnóstico no es concluyente, revisa la jerarquía accesible para detectar el paquete del teclado.
+  - Sólo envía `KEYCODE_BACK` cuando confirma que el teclado está visible; si ya está oculto, no cambia de pantalla.
+- Pruebas:
+  - Compilación de `panel.py` y `git diff --check`: correctos.
+  - Teclado visible: se envía una sola orden Atrás.
+  - Teclado oculto: no se envía Atrás.
+  - Alternativa por accesibilidad y variantes de diagnóstico Android: correctas mediante simulación local.
+  - Catálogo y explicación de la acción verificados en una instancia aislada de la interfaz.
+  - No se ejecutaron acciones reales sobre el teléfono.
+- Commit resultante: El commit de la rama `integracion` que contiene esta entrada.
+
 ### CHG-20261112-0001 — Acción para identificar texto y pulsarlo
 
 - Fecha de inicio: 2026-11-12 (America/Mexico_City)

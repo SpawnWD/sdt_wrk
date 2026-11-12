@@ -67,6 +67,7 @@ class ProfessionalPhoneController:
         "Presionar y deslizar": "swipe",
         "Identificar texto y pulsar": "tap_text",
         "Escribir texto": "text",
+        "Ocultar teclado": "hide_keyboard",
         "Cargar lista por renglones": "load_list",
         "Siguiente elemento de lista": "next_list",
         "Abrir liga / link": "open_url",
@@ -840,6 +841,17 @@ class ProfessionalPhoneController:
             ).pack(anchor="w", pady=(4, 0))
             return
 
+        if action_type == "hide_keyboard":
+            ttk.Label(
+                self.sequence_action_fields,
+                text=(
+                    "Comprueba si el teclado está visible y sólo entonces lo oculta. "
+                    "Si ya está cerrado, no pulsa Atrás ni cambia de pantalla."
+                ),
+                foreground="#1d5f91",
+            ).pack(anchor="w")
+            return
+
         if action_type == "text":
             row = ttk.Frame(self.sequence_action_fields)
             row.pack(fill="x")
@@ -1198,6 +1210,8 @@ class ProfessionalPhoneController:
             if not target_text or len(target_text) > 500:
                 return None
             return {"type": "tap_text", "target_text": target_text}
+        if step_type == "hide_keyboard":
+            return {"type": "hide_keyboard"}
         if step_type == "wait":
             try:
                 if "min_seconds" in step or "max_seconds" in step:
@@ -1293,6 +1307,8 @@ class ProfessionalPhoneController:
             )
         if step["type"] == "tap_text":
             return "Identificar y pulsar", f'Texto exacto: "{step["target_text"][:80]}"'
+        if step["type"] == "hide_keyboard":
+            return "Ocultar teclado", "Cerrar sólo cuando Android confirme que está visible"
         if step["type"] == "wait":
             minimum = step["min_seconds"]
             maximum = step["max_seconds"]
@@ -1568,6 +1584,45 @@ class ProfessionalPhoneController:
             self.log(f'[{device}] Secuencia: se encontró "{target_text}", pero el toque falló: {detail}')
         return ok
 
+    @staticmethod
+    def keyboard_visible_from_diagnostics(output):
+        """Interpreta los indicadores habituales de teclado visible entre versiones de Android."""
+        value = str(output or "")
+        true_markers = (
+            r"\bmInputShown\s*=\s*true\b",
+            r"\bisInputViewShown\s*=\s*true\b",
+            r"\bmInputMethodWindowVisible\s*=\s*true\b",
+            r"\bmImeShowing\s*=\s*true\b",
+            r"\bmImeWindowVis\s*=\s*0x(?:2|3)\b",
+        )
+        return any(re.search(pattern, value, re.IGNORECASE) for pattern in true_markers)
+
+    def is_keyboard_visible(self, device):
+        ok, diagnostics = self.run_on_device(device, ["shell", "dumpsys", "input_method"], timeout=15)
+        if ok and self.keyboard_visible_from_diagnostics(diagnostics):
+            return True
+        try:
+            hierarchy = self.get_android_hierarchy(device)
+            if hierarchy is not None:
+                for node in hierarchy.iter("node"):
+                    package = node.attrib.get("package", "").casefold()
+                    if any(marker in package for marker in ("inputmethod", "keyboard", ".ime")):
+                        return True
+        except Exception as error:
+            self.log(f"[{device}] Secuencia: no se pudo verificar el teclado por accesibilidad: {error}")
+        return False
+
+    def hide_keyboard_if_visible(self, device):
+        if not self.is_keyboard_visible(device):
+            self.log(f"[{device}] Secuencia: el teclado ya está oculto; no se pulsó Atrás.")
+            return True
+        ok, detail = self.run_on_device(device, ["shell", "input", "keyevent", "4"], timeout=15)
+        if ok:
+            self.log(f"[{device}] Secuencia: teclado ocultado.")
+        else:
+            self.log(f"[{device}] Secuencia: no se pudo ocultar el teclado: {detail}")
+        return ok
+
     def open_url_on_device(self, device, url):
         """Reutiliza únicamente la apertura de liga empleada por Interacciones."""
         value = str(url or "").strip()
@@ -1736,6 +1791,8 @@ class ProfessionalPhoneController:
                         )
                     elif step["type"] == "tap_text":
                         self.tap_visible_text(device, step["target_text"])
+                    elif step["type"] == "hide_keyboard":
+                        self.hide_keyboard_if_visible(device)
                     elif step["type"] == "back":
                         ok, detail_result = self.run_on_device(
                             device, ["shell", "input", "keyevent", "4"], timeout=15
