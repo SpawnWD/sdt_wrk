@@ -21,6 +21,34 @@ Ninguno.
 
 ## Cambios completados
 
+### CHG-20261112-0830 — Acción para subir imagen o video al teléfono
+
+- Fecha y hora de inicio: 2026-11-12 08:30:29 (America/Mexico_City)
+- Estado: Completado localmente el 2026-11-12 08:32:41 (America/Mexico_City)
+- Tipo: Funcionalidad solicitada por el cliente
+- Autoría: Se conserva la autoría del proyecto original; el ajuste se limita al constructor de tareas solicitado.
+- Objetivo: Permitir seleccionar una imagen o video local y agregar su transferencia al teléfono como un paso de la secuencia.
+- Estrategia: Enviar imágenes a `Pictures/PanelCelulares` y videos a `Movies/PanelCelulares`, después notificar al escáner multimedia de Android para que aparezcan en Galería/Archivos.
+- Privacidad y repositorio: La secuencia guardará únicamente la ruta local; el archivo multimedia no se copiará al proyecto ni se publicará en Git.
+- Alcance: `panel.py`, `LEEME.txt` y esta bitácora.
+- Riesgos: archivo movido después de guardar la secuencia, espacio insuficiente en el teléfono o desconexión durante la transferencia.
+- Referencia de rollback: commit `d550f69` de la rama `integracion`.
+- Rama Git: `integracion`.
+- Implementación:
+  - Se agregó `Subir imagen/video al teléfono` al catálogo de Secuencias de acciones.
+  - El selector admite formatos comunes de imagen y video y muestra la ruta elegida sin copiar el archivo al proyecto.
+  - Al ejecutar, crea `Pictures/PanelCelulares` para imágenes o `Movies/PanelCelulares` para videos y transfiere el archivo mediante ADB.
+  - Después solicita el escaneo multimedia de Android para que el archivo aparezca en Galería/Archivos.
+  - La transferencia puede detenerse con el botón `Detener` y tiene protección ante desconexión o una espera superior a diez minutos.
+  - Si el archivo local fue movido o eliminado, el paso lo informa y no intenta transferirlo.
+- Pruebas:
+  - Compilación de `panel.py` y `git diff --check`: correctos.
+  - Clasificación de imagen/video, validación del paso, destino remoto y URI de escaneo: correctos mediante simulación local.
+  - Cancelación de una transferencia activa mediante `Detener`: correcta.
+  - Selector y acción verificados en una instancia aislada de la interfaz.
+  - No se transfirieron archivos reales ni se ejecutaron acciones sobre el teléfono.
+- Commit resultante: El commit de la rama `integracion` que contiene esta entrada.
+
 ### CHG-20261112-0825 — Acción para ocultar el teclado
 
 - Fecha y hora de inicio: 2026-11-12 08:25:56 (America/Mexico_City)

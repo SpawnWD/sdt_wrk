@@ -19,7 +19,7 @@ import sys
 import traceback
 from pathlib import Path
 from tkinter import filedialog, messagebox, scrolledtext, simpledialog, ttk
-from urllib.parse import urlparse
+from urllib.parse import quote, urlparse
 import base64
 
 NO_WINDOW = getattr(subprocess, "CREATE_NO_WINDOW", 0) if os.name == "nt" else 0
@@ -62,12 +62,15 @@ except ImportError:
 
 
 class ProfessionalPhoneController:
+    SEQUENCE_IMAGE_EXTENSIONS = {".jpg", ".jpeg", ".png", ".gif", ".webp", ".bmp", ".heic", ".heif", ".avif"}
+    SEQUENCE_VIDEO_EXTENSIONS = {".mp4", ".mov", ".mkv", ".avi", ".webm", ".3gp", ".m4v", ".mpeg", ".mpg", ".wmv"}
     SEQUENCE_ACTIONS = {
         "Dar clic en la captura": "tap",
         "Presionar y deslizar": "swipe",
         "Identificar texto y pulsar": "tap_text",
         "Escribir texto": "text",
         "Ocultar teclado": "hide_keyboard",
+        "Subir imagen/video al teléfono": "upload_media",
         "Cargar lista por renglones": "load_list",
         "Siguiente elemento de lista": "next_list",
         "Abrir liga / link": "open_url",
@@ -791,6 +794,7 @@ class ProfessionalPhoneController:
         self.sequence_action_max_var = None
         self.sequence_action_duration_var = None
         self.sequence_action_target_text_var = None
+        self.sequence_action_media_path_var = None
 
         if action_type == "tap":
             ttk.Label(
@@ -850,6 +854,27 @@ class ProfessionalPhoneController:
                 ),
                 foreground="#1d5f91",
             ).pack(anchor="w")
+            return
+
+        if action_type == "upload_media":
+            row = ttk.Frame(self.sequence_action_fields)
+            row.pack(fill="x")
+            ttk.Label(row, text="Imagen o video:").pack(side="left")
+            self.sequence_action_media_path_var = tk.StringVar()
+            ttk.Entry(
+                row,
+                textvariable=self.sequence_action_media_path_var,
+                state="readonly",
+            ).pack(side="left", fill="x", expand=True, padx=(6, 6))
+            ttk.Button(row, text="Seleccionar archivo", command=self.choose_sequence_media).pack(side="left")
+            ttk.Label(
+                self.sequence_action_fields,
+                text=(
+                    "Al ejecutar el paso, las imágenes se copian a Pictures/PanelCelulares y los videos a "
+                    "Movies/PanelCelulares; Android los registra para Galería y Archivos."
+                ),
+                foreground="#1d5f91",
+            ).pack(anchor="w", pady=(4, 0))
             return
 
         if action_type == "text":
@@ -956,6 +981,18 @@ class ProfessionalPhoneController:
             return None
         return round(minimum, 3), round(maximum, 3)
 
+    def choose_sequence_media(self):
+        path = filedialog.askopenfilename(
+            title="Seleccionar imagen o video",
+            parent=self.root,
+            filetypes=(
+                ("Imágenes y videos", "*.jpg *.jpeg *.png *.gif *.webp *.bmp *.heic *.heif *.avif *.mp4 *.mov *.mkv *.avi *.webm *.3gp *.m4v *.mpeg *.mpg *.wmv"),
+                ("Todos los archivos", "*.*"),
+            ),
+        )
+        if path and self.sequence_action_media_path_var is not None:
+            self.sequence_action_media_path_var.set(str(Path(path).resolve()))
+
     def add_configured_sequence_action(self):
         if self.sequence_running:
             return
@@ -1013,6 +1050,16 @@ class ProfessionalPhoneController:
                     parent=self.root,
                 )
             step["target_text"] = target_text
+        if action_type == "upload_media":
+            media_path = Path(self.sequence_action_media_path_var.get().strip())
+            media_type = self.sequence_media_type(media_path)
+            if not media_path.is_file() or media_type is None:
+                return messagebox.showwarning(
+                    "Archivo no válido",
+                    "Selecciona una imagen o video compatible que todavía exista en el equipo.",
+                    parent=self.root,
+                )
+            step.update({"local_path": str(media_path.resolve()), "media_type": media_type})
         if action_type == "text":
             use_list = bool(self.sequence_action_use_list_var.get())
             text_value = self.sequence_action_text_widget.get("1.0", tk.END).rstrip("\r\n")
@@ -1212,6 +1259,15 @@ class ProfessionalPhoneController:
             return {"type": "tap_text", "target_text": target_text}
         if step_type == "hide_keyboard":
             return {"type": "hide_keyboard"}
+        if step_type == "upload_media":
+            local_path = str(step.get("local_path", "")).strip()
+            media_type = str(step.get("media_type", "")).strip().casefold()
+            detected_type = self.sequence_media_type(Path(local_path)) if local_path else None
+            if not local_path or len(local_path) > 32767 or media_type not in {"image", "video"}:
+                return None
+            if detected_type != media_type:
+                return None
+            return {"type": "upload_media", "local_path": local_path, "media_type": media_type}
         if step_type == "wait":
             try:
                 if "min_seconds" in step or "max_seconds" in step:
@@ -1309,6 +1365,9 @@ class ProfessionalPhoneController:
             return "Identificar y pulsar", f'Texto exacto: "{step["target_text"][:80]}"'
         if step["type"] == "hide_keyboard":
             return "Ocultar teclado", "Cerrar sólo cuando Android confirme que está visible"
+        if step["type"] == "upload_media":
+            media_label = "Imagen" if step["media_type"] == "image" else "Video"
+            return "Subir multimedia", f"{media_label}: {Path(step['local_path']).name}"
         if step["type"] == "wait":
             minimum = step["min_seconds"]
             maximum = step["max_seconds"]
@@ -1623,6 +1682,74 @@ class ProfessionalPhoneController:
             self.log(f"[{device}] Secuencia: no se pudo ocultar el teclado: {detail}")
         return ok
 
+    @classmethod
+    def sequence_media_type(cls, path):
+        suffix = Path(path).suffix.casefold()
+        if suffix in cls.SEQUENCE_IMAGE_EXTENSIONS:
+            return "image"
+        if suffix in cls.SEQUENCE_VIDEO_EXTENSIONS:
+            return "video"
+        return None
+
+    def upload_media_to_device(self, device, local_path, media_type, stop_event):
+        source = Path(local_path)
+        if not source.is_file():
+            self.log(f"[{device}] Secuencia: el archivo multimedia ya no existe: {source}")
+            return "failed"
+        detected_type = self.sequence_media_type(source)
+        if detected_type != media_type:
+            self.log(f"[{device}] Secuencia: el tipo del archivo multimedia no coincide; transferencia omitida.")
+            return "failed"
+        remote_directory = "/sdcard/Pictures/PanelCelulares" if media_type == "image" else "/sdcard/Movies/PanelCelulares"
+        remote_path = f"{remote_directory}/{source.name}"
+        ok, detail = self.run_on_device(device, ["shell", "mkdir", "-p", remote_directory], timeout=20)
+        if not ok:
+            self.log(f"[{device}] Secuencia: no se pudo preparar la carpeta multimedia: {detail}")
+            return "failed"
+        command = [self.adb, "-s", device, "push", str(source), remote_path]
+        try:
+            process = subprocess.Popen(
+                command,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True,
+                errors="replace",
+                creationflags=NO_WINDOW,
+            )
+            started = time.monotonic()
+            while process.poll() is None:
+                if self.app_closing.is_set() or stop_event.is_set():
+                    process.terminate()
+                    process.communicate(timeout=5)
+                    self.log(f"[{device}] Secuencia: transferencia multimedia detenida.")
+                    return "cancelled"
+                if time.monotonic() - started > 600:
+                    process.kill()
+                    process.communicate(timeout=5)
+                    self.log(f"[{device}] Secuencia: la transferencia multimedia excedió 10 minutos.")
+                    return "failed"
+                time.sleep(0.2)
+            stdout, stderr = process.communicate()
+            if process.returncode != 0:
+                self.log(f"[{device}] Secuencia: no se pudo subir {source.name}: {(stderr or stdout).strip()}")
+                return "failed"
+        except Exception as error:
+            self.log(f"[{device}] Secuencia: error al subir {source.name}: {error}")
+            return "failed"
+        scan_uri = "file://" + quote(remote_path, safe="/")
+        scan_ok, scan_detail = self.run_on_device(
+            device,
+            ["shell", "am", "broadcast", "-a", "android.intent.action.MEDIA_SCANNER_SCAN_FILE", "-d", scan_uri],
+            timeout=20,
+        )
+        if scan_ok:
+            self.log(f"[{device}] Secuencia: {source.name} disponible en {remote_directory}.")
+        else:
+            self.log(
+                f"[{device}] Secuencia: {source.name} fue copiado, pero Android no confirmó el registro multimedia: {scan_detail}"
+            )
+        return "sent"
+
     def open_url_on_device(self, device, url):
         """Reutiliza únicamente la apertura de liga empleada por Interacciones."""
         value = str(url or "").strip()
@@ -1793,6 +1920,16 @@ class ProfessionalPhoneController:
                         self.tap_visible_text(device, step["target_text"])
                     elif step["type"] == "hide_keyboard":
                         self.hide_keyboard_if_visible(device)
+                    elif step["type"] == "upload_media":
+                        upload_result = self.upload_media_to_device(
+                            device,
+                            step["local_path"],
+                            step["media_type"],
+                            self.sequence_stop_event,
+                        )
+                        if upload_result == "cancelled":
+                            result = "detenida"
+                            break
                     elif step["type"] == "back":
                         ok, detail_result = self.run_on_device(
                             device, ["shell", "input", "keyevent", "4"], timeout=15
