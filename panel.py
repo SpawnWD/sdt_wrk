@@ -65,6 +65,7 @@ class ProfessionalPhoneController:
     SEQUENCE_ACTIONS = {
         "Dar clic en la captura": "tap",
         "Presionar y deslizar": "swipe",
+        "Identificar texto y pulsar": "tap_text",
         "Escribir texto": "text",
         "Cargar lista por renglones": "load_list",
         "Siguiente elemento de lista": "next_list",
@@ -788,6 +789,7 @@ class ProfessionalPhoneController:
         self.sequence_action_min_var = None
         self.sequence_action_max_var = None
         self.sequence_action_duration_var = None
+        self.sequence_action_target_text_var = None
 
         if action_type == "tap":
             ttk.Label(
@@ -815,6 +817,24 @@ class ProfessionalPhoneController:
                 text=(
                     "Pulsa Agregar acción y marca dos puntos sobre la captura: primero el inicio sostenido "
                     "y después el destino del deslizamiento."
+                ),
+                foreground="#1d5f91",
+            ).pack(anchor="w", pady=(4, 0))
+            return
+
+        if action_type == "tap_text":
+            row = ttk.Frame(self.sequence_action_fields)
+            row.pack(fill="x")
+            ttk.Label(row, text="Texto que debe aparecer:").pack(side="left")
+            self.sequence_action_target_text_var = tk.StringVar(value="Escribe algo...")
+            ttk.Entry(row, textvariable=self.sequence_action_target_text_var).pack(
+                side="left", fill="x", expand=True, padx=(6, 0)
+            )
+            ttk.Label(
+                self.sequence_action_fields,
+                text=(
+                    "Busca la frase completa en la pantalla y pulsa su centro. "
+                    "Primero usa la información de Android y después el reconocimiento visual local."
                 ),
                 foreground="#1d5f91",
             ).pack(anchor="w", pady=(4, 0))
@@ -972,6 +992,15 @@ class ProfessionalPhoneController:
                 "Deslizamiento activo: marca primero dónde se mantendrá presionado y después el punto de destino."
             )
             return
+        if action_type == "tap_text":
+            target_text = self.sequence_action_target_text_var.get().strip()
+            if not target_text:
+                return messagebox.showwarning(
+                    "Texto requerido",
+                    "Escribe el texto que debe identificarse en la pantalla.",
+                    parent=self.root,
+                )
+            step["target_text"] = target_text
         if action_type == "text":
             use_list = bool(self.sequence_action_use_list_var.get())
             text_value = self.sequence_action_text_widget.get("1.0", tk.END).rstrip("\r\n")
@@ -1164,6 +1193,11 @@ class ProfessionalPhoneController:
                 "recorded_width": max(1, int(step.get("recorded_width", 1))),
                 "recorded_height": max(1, int(step.get("recorded_height", 1))),
             }
+        if step_type == "tap_text":
+            target_text = str(step.get("target_text", "")).strip()
+            if not target_text or len(target_text) > 500:
+                return None
+            return {"type": "tap_text", "target_text": target_text}
         if step_type == "wait":
             try:
                 if "min_seconds" in step or "max_seconds" in step:
@@ -1257,6 +1291,8 @@ class ProfessionalPhoneController:
                 f"X {step['start_x_ratio'] * 100:.1f}%, Y {step['start_y_ratio'] * 100:.1f}% → "
                 f"X {step['end_x_ratio'] * 100:.1f}%, Y {step['end_y_ratio'] * 100:.1f}% · {step['duration_ms']} ms",
             )
+        if step["type"] == "tap_text":
+            return "Identificar y pulsar", f'Texto exacto: "{step["target_text"][:80]}"'
         if step["type"] == "wait":
             minimum = step["min_seconds"]
             maximum = step["max_seconds"]
@@ -1481,6 +1517,57 @@ class ProfessionalPhoneController:
             return None
         return items[index]
 
+    @staticmethod
+    def normalize_tappable_text(value):
+        """Iguala espacios y las dos representaciones habituales de puntos suspensivos."""
+        normalized = unicodedata.normalize("NFKC", str(value or "")).casefold()
+        normalized = normalized.replace("…", "...")
+        return re.sub(r"\s+", " ", normalized).strip()
+
+    def find_visible_text_point(self, device, target_text):
+        """Devuelve el centro del texto exacto, priorizando accesibilidad sobre OCR."""
+        target = self.normalize_tappable_text(target_text)
+        if not target:
+            return None, None
+        hierarchy = self.get_android_hierarchy(device)
+        accessibility_matches = []
+        for record in self.accessibility_text_records(hierarchy):
+            if self.normalize_tappable_text(record.get("text")) != target:
+                continue
+            left, top, right, bottom = record["bounds"]
+            if right > left and bottom > top:
+                accessibility_matches.append((top, (left + right) // 2, (top + bottom) // 2))
+        if accessibility_matches:
+            accessibility_matches.sort()
+            _, x, y = accessibility_matches[0]
+            return (x, y), "accesibilidad"
+
+        ocr_matches = []
+        for record in self.windows_ocr_records(device):
+            if self.normalize_tappable_text(record.get("text")) != target:
+                continue
+            left, top, right, bottom = record.get("bounds", (0, 0, 0, 0))
+            if right > left and bottom > top:
+                ocr_matches.append((top, (left + right) // 2, (top + bottom) // 2))
+        if ocr_matches:
+            ocr_matches.sort()
+            _, x, y = ocr_matches[0]
+            return (x, y), "OCR local"
+        return None, None
+
+    def tap_visible_text(self, device, target_text):
+        point, source = self.find_visible_text_point(device, target_text)
+        if point is None:
+            self.log(f'[{device}] Secuencia: no se encontró el texto exacto "{target_text}".')
+            return False
+        x, y = point
+        ok, detail = self.run_on_device(device, ["shell", "input", "tap", str(x), str(y)], timeout=15)
+        if ok:
+            self.log(f'[{device}] Secuencia: texto "{target_text}" pulsado en ({x}, {y}) mediante {source}.')
+        else:
+            self.log(f'[{device}] Secuencia: se encontró "{target_text}", pero el toque falló: {detail}')
+        return ok
+
     def open_url_on_device(self, device, url):
         """Reutiliza únicamente la apertura de liga empleada por Interacciones."""
         value = str(url or "").strip()
@@ -1647,6 +1734,8 @@ class ProfessionalPhoneController:
                             f"({start_x}, {start_y}) → ({end_x}, {end_y}) "
                             + ("ejecutado." if ok else f"falló: {detail_result}")
                         )
+                    elif step["type"] == "tap_text":
+                        self.tap_visible_text(device, step["target_text"])
                     elif step["type"] == "back":
                         ok, detail_result = self.run_on_device(
                             device, ["shell", "input", "keyevent", "4"], timeout=15

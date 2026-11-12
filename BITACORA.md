@@ -21,6 +21,32 @@ Ninguno.
 
 ## Cambios completados
 
+### CHG-20261112-0001 — Acción para identificar texto y pulsarlo
+
+- Fecha de inicio: 2026-11-12 (America/Mexico_City)
+- Estado: Completado localmente el 2026-11-12 02:26:47 (America/Mexico_City)
+- Tipo: Funcionalidad solicitada por el cliente
+- Autoría: Se conserva la autoría del proyecto original; el ajuste se limita al constructor de tareas solicitado.
+- Objetivo: Agregar una acción que localice un texto visible configurable —inicialmente `Escribe algo...`— y pulse el centro del elemento encontrado.
+- Estrategia: Buscar primero en la información accesible de Android y, si el texto no está expuesto, usar el OCR local existente. No se usarán coordenadas fijas.
+- Alcance: `panel.py`, `LEEME.txt` y esta bitácora.
+- Riesgos: variantes de puntos suspensivos, texto duplicado en pantalla y controles sin información accesible.
+- Referencia de rollback: commit `d4dd396` de la rama `integracion`.
+- Rama Git: `integracion`.
+- Implementación:
+  - Se agregó `Identificar texto y pulsar` al catálogo de Secuencias de acciones.
+  - El campo comienza con `Escribe algo...` y permite configurar otra frase completa.
+  - La búsqueda prioriza la jerarquía accesible de Android y usa el OCR local existente como alternativa.
+  - `...` y `…` se consideran equivalentes; se normalizan espacios y mayúsculas, pero no se aceptan coincidencias parciales.
+  - El toque se ejecuta en el centro calculado del texto encontrado, sin coordenadas fijas.
+- Pruebas:
+  - Compilación de `panel.py`: correcta.
+  - `git diff --check`: correcto.
+  - Coincidencia accesible, variante de puntos suspensivos, alternativa OCR, centro calculado y rechazo de coincidencia parcial: correctos mediante simulación local.
+  - Catálogo visual y valor inicial del campo creados correctamente en una instancia aislada del panel.
+  - No se pulsó ningún control real del teléfono durante la prueba.
+- Commit resultante: El commit de la rama `integracion` que contiene esta entrada.
+
 ### CHG-20261106-1822 — Restaurar Dar clic y agregar gesto sostenido
 
 - Fecha y hora de inicio: 2026-11-06 18:22:13 (America/Mexico_City)
