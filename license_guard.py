@@ -12,14 +12,14 @@ from tkinter import ttk
 import uuid
 
 
-LICENSE_VERSION = 1
+LICENSE_VERSION = 2
 VALIDITY_DAYS = 20
 DRIVE_REMOVABLE = 2
 XOR_MASK = 0x5A
 
 # Los fragmentos de validación no se almacenan como texto legible ni se escriben en la licencia.
-_PREFIX_DATA = (56, 63, 45, 59, 40, 63, 104, 107, 106, 108)
-_SUFFIX_DATA = (107, 99, 98, 108)
+_PREFIX_DATA = (48, 53, 41, 63, 48, 53, 41, 63, 104, 107, 107, 111)
+_SUFFIX_DATA = (104, 106)
 _SIGNING_DATA = (
     210, 149, 110, 226, 94, 13, 188, 218, 46, 32, 174, 55, 154, 141, 121, 3,
     0, 162, 211, 47, 112, 125, 229, 11, 150, 132, 107, 138, 145, 251, 235, 149,

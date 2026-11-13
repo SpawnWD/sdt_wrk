@@ -107,7 +107,7 @@ VERSION EJECUTABLE Y LICENCIA
 - Para reconstruir la distribución instala PyInstaller con `python -m pip install pyinstaller` y ejecuta `Construir Ejecutable.ps1` desde PowerShell.
 - La carpeta técnica `release_1.88.1` generada por `Construir Ejecutable.ps1` contiene `AdministracionDeMoviles.exe` y su archivo de comprobación SHA-256; no contiene archivos fuente `.py`. La interfaz conserva `版本 1.88`; la carpeta separada permite preparar este parche sin cerrar una versión anterior que esté en uso.
 - El ejecutable muestra una pantalla de inicio y valida la licencia antes de abrir el panel.
-- La activación se renueva cada 20 días usando la contraseña dinámica acordada, calculada con la fecha local del día de activación. La contraseña no se guarda en el equipo ni en la licencia.
+- La activación versión 2 se renueva cada 20 días usando la contraseña dinámica acordada, calculada con la fecha local del día de activación. Al instalar esta versión se solicita una reactivación única para invalidar el formato anterior. La contraseña no se guarda en el equipo ni en la licencia.
 - Si el ejecutable está en un disco fijo, la licencia se vincula al equipo. Si se ejecuta desde una unidad que Windows identifica como removible, se vincula al número de volumen de esa USB.
 - Copiar el paquete a otro equipo, cambiar de USB, formatear la unidad o reinstalar Windows provoca una nueva solicitud de activación.
 - La licencia está firmada y detecta retrocesos de fecha respecto del último inicio. Es una protección local: dificulta el uso no autorizado, pero no sustituye una validación remota ni hace imposible el análisis de un ejecutable.

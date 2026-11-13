@@ -21,6 +21,37 @@ Esta bitácora registra el estado base del proyecto y todos los cambios que se r
 
 ## Cambios completados
 
+### CHG-20261113-0751 — Rotación de la contraseña dinámica de activación
+
+- Fecha y hora de inicio: 2026-11-13 07:51:59 (America/Mexico_City)
+- Estado: Completado localmente el 2026-11-13 07:53:45 (America/Mexico_City)
+- Tipo: Seguridad / Licencia
+- Solicitud: Sustituir el formato de contraseña dinámica de acceso manteniendo la fecha local `ddMMyyyy`, la renovación cada 20 días y el vínculo por equipo o memoria USB.
+- Seguridad: los fragmentos secretos no se escribirán en texto legible dentro del código, la licencia, las pruebas ni esta bitácora.
+- Cambio previsto:
+  - Reemplazar los fragmentos ofuscados usados por `expected_password`.
+  - Incrementar la versión del registro de licencia para que una activación anterior solicite la nueva contraseña al iniciar la versión actualizada.
+  - Conservar comparación de tiempo constante, firma HMAC, huella de equipo/USB y detección de retroceso de fecha.
+- Riesgo controlado: la versión nueva solicitará reactivación una vez; después conservará la vigencia normal de 20 días.
+- Referencia de rollback: commit `f3fff99` de la rama `integracion`.
+- Archivos previstos: `license_guard.py`, `LEEME.txt`, `Construir Ejecutable.ps1` y `BITACORA.md`.
+- Implementación:
+  - Se sustituyeron los fragmentos ofuscados del formato dinámico sin almacenar la contraseña en texto legible.
+  - `LICENSE_VERSION` cambió de 1 a 2 para invalidar una activación anterior y solicitar el formato nuevo una vez.
+  - Se conservaron `VALIDITY_DAYS=20`, la fecha local, la comparación HMAC de tiempo constante, la firma del registro y las huellas de equipo/USB.
+- Pruebas realizadas:
+  - Generación y aceptación de la contraseña esperada para una fecha controlada: correcta.
+  - Contraseña incorrecta: rechazada.
+  - Activación versión 2, inspección durante vigencia y renovación obligatoria exactamente al día 20: correctas.
+  - Búsqueda del fragmento secreto legible en los archivos del proyecto: sin coincidencias.
+  - `python -m py_compile panel.py license_guard.py`, `git diff --check`, compilación PyInstaller y comprobación del hash: correctos.
+- Archivos modificados: `license_guard.py`, `LEEME.txt`, `Construir Ejecutable.ps1` y `BITACORA.md`.
+- Entrega: `release_1.88.15/AdministracionDeMoviles.exe` (87,086,695 bytes) y `SHA256.txt`.
+- SHA-256: `35373AAFDB88299B0D52AF654C348C663B72E0FD229894F674D0AB0E2EC28389`.
+- Commit resultante: pendiente de crear.
+- Publicado o respaldado: pendiente de publicación en `integracion`.
+- Procedimiento de rollback: revertir el commit resultante o restaurar `f3fff99` en una rama de recuperación; la versión 1 de licencia volvería a ser aceptada por esa versión anterior.
+
 ### CHG-20261113-0747 — Recuperar publicación cuando el enlace abre un Live
 
 - Fecha y hora de inicio: 2026-11-13 07:47:58 (America/Mexico_City)
@@ -55,8 +86,8 @@ Esta bitácora registra el estado base del proyecto y todos los cambios que se r
 - Archivos modificados: `panel.py`, `LEEME.txt`, `Construir Ejecutable.ps1` y `BITACORA.md`.
 - Entrega provisional: `release_1.88.14/AdministracionDeMoviles.exe` (87,086,836 bytes) y `SHA256.txt`.
 - SHA-256: `4ED9CAC5A04C1A8D82708B24354E72016FF983F4D95CBDFD40431F401360A1D9`.
-- Commit resultante: pendiente de crear.
-- Publicado o respaldado: pendiente de publicación en `integracion`.
+- Commit funcional resultante: `f3fff99` (`fix: recuperar publicacion cuando enlace abre live`).
+- Publicado o respaldado: Sí; cambio funcional publicado en la rama `integracion` de GitHub.
 - Procedimiento de rollback: revertir el commit resultante o restaurar `2a7b6d1` en una rama de recuperación.
 
 ### CHG-20261113-0730 — Foco estable del comentario y reanudación inmediata del scroll
