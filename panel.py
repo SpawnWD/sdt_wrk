@@ -3104,7 +3104,70 @@ class ProfessionalPhoneController:
                 distinct.append(bounds)
         return len(distinct) >= 4
 
-    def find_intermediate_back_control(self, hierarchy, screen_size, ocr_records=None):
+    def looks_like_left_chevron(self, screen, bounds):
+        """Valida visualmente dos diagonales que convergen como un símbolo `<`."""
+        if not OPENCV_AVAILABLE or screen is None or not bounds:
+            return False
+        height, width = screen.shape[:2]
+        left, top, right, bottom = bounds
+        pad_x = max(3, int((right - left) * 0.08))
+        pad_y = max(3, int((bottom - top) * 0.08))
+        x1, x2 = max(0, left - pad_x), min(width, right + pad_x)
+        y1, y2 = max(0, top - pad_y), min(height, bottom + pad_y)
+        crop = screen[y1:y2, x1:x2]
+        if crop.size == 0:
+            return False
+        gray = cv2.cvtColor(crop, cv2.COLOR_BGR2GRAY)
+        # El chevrón de navegación está dibujado sobre un fondo mayormente claro.
+        # Este filtro elimina avatares y fotografías que también contienen muchas
+        # diagonales y podrían parecer un `<` por pura geometría.
+        dark_ratio = float(np.count_nonzero(gray < 160)) / float(gray.size)
+        bright_ratio = float(np.count_nonzero(gray > 220)) / float(gray.size)
+        if dark_ratio > 0.22 or bright_ratio < 0.58:
+            return False
+        edges = cv2.Canny(gray, 25, 100)
+        crop_h, crop_w = gray.shape[:2]
+        min_length = max(8, int(min(crop_w, crop_h) * 0.12))
+        lines = cv2.HoughLinesP(
+            edges,
+            1,
+            np.pi / 180.0,
+            threshold=4,
+            minLineLength=min_length,
+            maxLineGap=max(5, int(min(crop_w, crop_h) * 0.12)),
+        )
+        if lines is None:
+            return False
+        negative = []
+        positive = []
+        for raw in np.asarray(lines).reshape(-1, 4):
+            x_start, y_start, x_end, y_end = map(int, raw)
+            if x_start > x_end:
+                x_start, x_end = x_end, x_start
+                y_start, y_end = y_end, y_start
+            delta_x = x_end - x_start
+            if delta_x <= 0:
+                continue
+            slope = (y_end - y_start) / float(delta_x)
+            if not 0.35 <= abs(slope) <= 3.5:
+                continue
+            item = (x_start, y_start, x_end, y_end)
+            (positive if slope > 0 else negative).append(item)
+        for upper in negative:
+            for lower in positive:
+                left_x_gap = abs(upper[0] - lower[0])
+                left_y_gap = abs(upper[1] - lower[1])
+                left_y = (upper[1] + lower[1]) / 2.0
+                if left_x_gap > crop_w * 0.28 or left_y_gap > crop_h * 0.30:
+                    continue
+                if upper[3] >= left_y - crop_h * 0.08:
+                    continue
+                if lower[3] <= left_y + crop_h * 0.08:
+                    continue
+                return True
+        return False
+
+    def find_intermediate_back_control(self, hierarchy, screen_size, ocr_records=None, screen=None):
         """Localiza el `<` lateral de una pantalla intermedia, no el del post."""
         if hierarchy is None or not screen_size:
             return None
@@ -3137,9 +3200,17 @@ class ProfessionalPhoneController:
                 and width * 0.055 <= box_width <= width * 0.24
                 and height * 0.022 <= box_height <= height * 0.13
             )
+            if geometric_back and screen is not None:
+                geometric_back = self.looks_like_left_chevron(screen, bounds)
             if labeled_back or geometric_back:
                 priority = 0 if labeled_back else 2
-                candidates.append((priority, abs(center[1] - height // 2), center, "accesibilidad" if labeled_back else "geometría"))
+                candidates.append((
+                    priority,
+                    abs(center[1] - height // 2),
+                    center,
+                    "accesibilidad" if labeled_back else "geometría visual",
+                    bounds,
+                ))
         for record in ocr_records or []:
             bounds = record.get("bounds")
             label = self.normalize_search_text(record.get("text", "")).strip()
@@ -3148,12 +3219,12 @@ class ProfessionalPhoneController:
             left, top, right, bottom = bounds
             center = ((left + right) // 2, (top + bottom) // 2)
             if center[0] <= width * 0.22 and height * 0.14 <= center[1] <= height * 0.86:
-                candidates.append((1, abs(center[1] - height // 2), center, "OCR"))
+                candidates.append((1, abs(center[1] - height // 2), center, "OCR", bounds))
         if not candidates:
             return None
         candidates.sort(key=lambda item: (item[0], item[1]))
-        _, _, point, source = candidates[0]
-        return {"point": point, "source": source}
+        _, _, point, source, bounds = candidates[0]
+        return {"point": point, "source": source, "bounds": bounds}
 
     def has_ad_label_above(self, records, target_y, screen_height, max_distance_ratio=0.30):
         for record in records:
@@ -3748,20 +3819,17 @@ class ProfessionalPhoneController:
             records = self.accessibility_text_records(hierarchy)
             ocr_records = self.windows_ocr_records(device)
             records.extend(ocr_records)
-            if (
-                self.is_open_post_view(records, screen_size)
-                or self.is_open_post_hierarchy(hierarchy, screen_size)
-            ):
-                self.log(f"[{device}] Publicación original recuperada después de obtener el enlace.")
-                return True
             if self.is_facebook_feed_hierarchy(hierarchy, screen_size):
                 self.log(f"[{device}] El retorno llegó al feed antes que a la publicación.")
                 break
-            back_control = self.find_intermediate_back_control(hierarchy, screen_size, ocr_records)
+            screen = self.capture_device_screen(device)
+            back_control = self.find_intermediate_back_control(
+                hierarchy, screen_size, ocr_records, screen=screen
+            )
             if back_control:
                 point = back_control["point"]
                 self.log(
-                    f"[{device}] Pantalla intermedia: control < localizado por "
+                    f"[{device}] Publicación todavía no recuperada: control < inferior localizado por "
                     f"{back_control['source']} en {point}; regresando un paso."
                 )
                 ok, detail = self.run_on_device(
@@ -3769,6 +3837,15 @@ class ProfessionalPhoneController:
                     ["shell", "input", "tap", str(point[0]), str(point[1])],
                     timeout=15,
                 )
+            elif (
+                self.is_open_post_view(records, screen_size)
+                or self.is_open_post_hierarchy(hierarchy, screen_size)
+            ):
+                self.log(
+                    f"[{device}] Publicación original recuperada sin controles < inferiores; "
+                    "ya se puede buscar la fila de acciones."
+                )
+                return True
             else:
                 self.log(
                     f"[{device}] Estado intermedio sin control < accesible; "
@@ -3795,7 +3872,7 @@ class ProfessionalPhoneController:
                 return False
             if self.wait_or_cancel(1.4, self.search_stop_event):
                 return False
-            if self.confirm_open_post(device, screen_size, attempts=4, delay=0.65):
+            if self.confirm_actionable_open_post(device, screen_size, attempts=4, delay=0.65):
                 self.log(f"[{device}] Publicación original reabierta y confirmada mediante su enlace.")
                 return True
         self.log(f"[{device}] No se logró recuperar una vista confirmada de la publicación.")
@@ -4068,6 +4145,12 @@ class ProfessionalPhoneController:
     def scroll_to_post_action_row(self, device, screen_size, stop_event=None, max_scrolls=18):
         """Desplaza desde una zona segura hasta confirmar la fila completa de acciones."""
         width, height = screen_size
+        if not self.confirm_actionable_open_post(device, screen_size, attempts=2, delay=0.35):
+            self.log(
+                f"[{device}] No se iniciará el scroll de acciones: la publicación limpia "
+                "todavía no está confirmada."
+            )
+            return None
         for attempt in range(max(0, max_scrolls) + 1):
             hierarchy = self.get_android_hierarchy(device)
             row = self.find_post_action_row(hierarchy, screen_size)
@@ -4503,6 +4586,34 @@ class ProfessionalPhoneController:
                 return False
         return False
 
+    def confirm_actionable_open_post(self, device, screen_size, attempts=2, delay=0.45):
+        """Confirma publicación abierta y ausencia de un `<` intermedio inferior."""
+        for attempt in range(max(1, attempts)):
+            hierarchy = self.get_android_hierarchy(device)
+            records = self.accessibility_text_records(hierarchy)
+            ocr_records = self.windows_ocr_records(device)
+            records.extend(ocr_records)
+            if self.is_facebook_feed_hierarchy(hierarchy, screen_size):
+                return False
+            screen = self.capture_device_screen(device)
+            back_control = self.find_intermediate_back_control(
+                hierarchy, screen_size, ocr_records, screen=screen
+            )
+            if back_control:
+                self.log(
+                    f"[{device}] Aún existe un control < inferior en {back_control['point']}; "
+                    "la publicación no está lista para acciones."
+                )
+                return False
+            if (
+                self.is_open_post_view(records, screen_size)
+                or self.is_open_post_hierarchy(hierarchy, screen_size)
+            ):
+                return True
+            if attempt + 1 < attempts and self.wait_or_cancel(delay, self.search_stop_event):
+                return False
+        return False
+
     def open_search_match_post(self, device, snapshot, screen_size):
         point = snapshot["timestamp_point"]
         self.log(
@@ -4686,7 +4797,7 @@ class ProfessionalPhoneController:
                             post_url = self.capture_open_post_link(dev, size)
                             record_path, link_added = self.save_search_link_record(dev, snapshot, post_url)
                         if like_on_match or comment_on_match:
-                            post_ready = self.confirm_open_post(dev, size, attempts=2)
+                            post_ready = self.confirm_actionable_open_post(dev, size, attempts=2)
                             if not post_ready:
                                 self.log(
                                     f"[{dev}] Después de obtener el enlace no se confirmó la publicación; "

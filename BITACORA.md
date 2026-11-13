@@ -21,6 +21,37 @@ Esta bitácora registra el estado base del proyecto y todos los cambios que se r
 
 ## Cambios completados
 
+### CHG-20261112-2015 — Validación del regreso intermedio antes del scroll de acciones
+
+- Fecha y hora de inicio: 2026-11-12 20:15:39 (America/Mexico_City)
+- Estado: Completado localmente el 2026-11-12 20:20:08 (America/Mexico_City)
+- Tipo: Corrección de navegación posterior a la captura del enlace
+- Solicitud: Después del mensaje `Publicación original recuperada después de obtener el enlace`, comprobar que no exista un `<` lateral en la parte media o inferior; su presencia indica que aún falta regresar un nivel antes de desplazar para buscar Me gusta.
+- Diagnóstico: `return_from_settings_to_post` confirma primero el diseño de publicación y sólo después busca un control intermedio. Una capa puede conservar visibles el editor o el contenido subyacentes, haciendo que la publicación parezca recuperada aunque todavía muestre otro `<` lateral.
+- Alcance: verificación visual del chevrón lateral, prioridad del regreso intermedio sobre la confirmación de publicación, confirmación limpia antes de acciones, documentación, pruebas y ejecutable.
+- Riesgo controlado: no confundir avatares, tarjetas o controles del feed con un `<`; se conservará la detección previa del feed y los candidatos geométricos deberán tener forma visual de chevrón izquierdo.
+- Referencia de rollback: commit `49e9ab2` de la rama `integracion`.
+- Implementación:
+  - Añade reconocimiento visual del `<` mediante dos diagonales de pendientes opuestas que convergen en un vértice izquierdo.
+  - Exige un fondo mayormente claro para candidatos geométricos; así descarta fotografías y avatares con diagonales accidentales.
+  - En el retorno desde Ajustes, detecta primero el feed y después cualquier `<` inferior verificado. La publicación sólo se acepta cuando ambas comprobaciones son negativas y su diseño sigue confirmado.
+  - Si aparece el `<` inferior, lo pulsa una sola vez, espera y vuelve a inspeccionar desde cero antes de emitir el mensaje de recuperación.
+  - Añade `confirm_actionable_open_post`, usada después de reabrir el enlace, antes de ejecutar acciones y al inicio del método de scroll.
+  - El scroll hacia Me gusta/Comentar/Compartir queda bloqueado mientras la publicación limpia no esté confirmada.
+- Pruebas realizadas:
+  - Flecha superior real de publicación reconocida como chevrón; al estar fuera de la zona inferior no se trató como capa intermedia.
+  - Avatar real del feed en `(16,806)-(120,910)` rechazado por su densidad visual; el feed se confirmó y no recibió toques.
+  - Capa simulada con editor y contenido subyacentes más un `<` en `(50,700)`: fue rechazada como lista, recibió un único toque de regreso y después confirmó la publicación limpia.
+  - Prueba del guardián de scroll: con capa intermedia activa no ejecutó ningún gesto.
+  - Compilación de `panel.py` y `license_guard.py`, `git diff --check`, verificación de hash y constructor PyInstaller: correctos.
+  - No se ejecutaron Me gusta ni Comentario durante las pruebas.
+- Archivos modificados: `panel.py`, `LEEME.txt`, `Construir Ejecutable.ps1` y `BITACORA.md`.
+- Entrega: `release_1.88.6/AdministracionDeMoviles.exe` (87,075,134 bytes) y `SHA256.txt`.
+- SHA-256: `7A3E7A832F748AAEB47B59889D5196B6AD7FB87D797F30F0BFCF30C30F0BF5AD`.
+- Commit resultante: el commit de la rama `integracion` que contiene esta entrada.
+- Publicado o respaldado: pendiente de publicación en `integracion`.
+- Procedimiento de rollback: revertir el commit resultante o restaurar `49e9ab2` en una rama de recuperación.
+
 ### CHG-20261112-2006 — Coincidencia OCR con fecha integrada en encabezado ancho
 
 - Fecha y hora de inicio: 2026-11-12 20:06:47 (America/Mexico_City)
