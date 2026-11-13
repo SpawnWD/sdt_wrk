@@ -47,7 +47,7 @@ Esta bitácora registra el estado base del proyecto y todos los cambios que se r
 - Entrega: `release_1.88.2/AdministracionDeMoviles.exe` (87,067,301 bytes) y `SHA256.txt`.
 - SHA-256: `B21A9EAEA607F2B74DB50A1D14F275E70587A0ADB56DD8108A52F66344A90455`.
 - Commit resultante: el commit de la rama `integracion` que contiene esta entrada.
-- Publicado o respaldado: se publicará en la rama `integracion` junto con esta entrada.
+- Publicado o respaldado: Sí; cambio funcional publicado en la rama `integracion` de GitHub mediante el commit `10105f6`.
 - Procedimiento de rollback: revertir el commit resultante o restaurar `2b1fae7` en una rama de recuperación.
 
 ### CHG-20261112-1528 — Validación desplazada del comentario antes del reintento
