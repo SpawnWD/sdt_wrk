@@ -3346,6 +3346,91 @@ class ProfessionalPhoneController:
         left, top, right, bottom = bounds
         return ((left + right) // 2, (top + bottom) // 2)
 
+    def post_header_anchor(self, text_value):
+        """Extrae el nombre estable que aparece antes de la fecha/hora del post."""
+        normalized = re.sub(r"\s+", " ", self.normalize_search_text(text_value or "")).strip()
+        if not normalized:
+            return ""
+        parts = [part.strip(" .·•|-") for part in re.split(r"[·•|]", normalized)]
+        time_pattern = re.compile(
+            r"(?:^|\s)\d{1,3}\s*(?:min(?:uto)?s?|m|h|hora?s?|d|dia?s?|sem(?:ana)?s?|a|ano?s?)(?:\s|$)"
+        )
+        for part in parts:
+            if len(part) >= 3 and re.search(r"[a-z]", part) and not time_pattern.search(part):
+                return part[:100]
+        without_time = time_pattern.sub(" ", normalized)
+        without_time = re.sub(r"\b(?:publicacion|post|publicado|hace)\b", " ", without_time)
+        without_time = re.sub(r"[^\w\s]", " ", without_time, flags=re.UNICODE)
+        without_time = re.sub(r"\s+", " ", without_time).strip()
+        return without_time[:100] if len(without_time) >= 3 and re.search(r"[a-z]", without_time) else ""
+
+    def nearby_post_header_anchor(self, records, timestamp, screen_size):
+        """Obtiene el encabezado cercano cuando fecha y nombre vienen en nodos separados."""
+        direct = self.post_header_anchor(timestamp.get("text", ""))
+        if direct:
+            return direct
+        if not screen_size or not timestamp.get("bounds"):
+            return ""
+        _, height = screen_size
+        t_left, t_top, t_right, t_bottom = timestamp["bounds"]
+        candidates = []
+        for record in records:
+            if record is timestamp or not record.get("bounds"):
+                continue
+            left, top, right, bottom = record["bounds"]
+            if bottom > t_bottom + height * 0.015 or t_top - bottom > height * 0.10:
+                continue
+            text_value = record.get("text", "").strip()
+            anchor = self.post_header_anchor(text_value)
+            if not anchor or self.is_post_timestamp_record(record, screen_size):
+                continue
+            if self.is_ad_label_record(record):
+                continue
+            candidates.append((abs(t_top - bottom), -len(anchor), anchor))
+        if not candidates:
+            return ""
+        candidates.sort()
+        return candidates[0][2]
+
+    def post_reference_from_snapshot(self, snapshot):
+        """Conserva la identidad mínima necesaria para volver al mismo post."""
+        return {
+            "header_anchor": self.normalize_search_text(snapshot.get("header_anchor", "")).strip(),
+            "matches": [
+                self.normalize_search_text(value).strip()
+                for value in snapshot.get("matches", [])
+                if self.normalize_search_text(value).strip()
+            ],
+            "timestamp_text": self.normalize_search_text(snapshot.get("timestamp_text", "")).strip(),
+        }
+
+    def post_reference_matches(self, records, post_reference):
+        """Compara el encabezado guardado con el texto de la pantalla actual."""
+        if not post_reference:
+            return True
+        normalized_records = [
+            re.sub(r"\s+", " ", self.normalize_search_text(record.get("text", ""))).strip()
+            for record in records or []
+            if record.get("text", "").strip()
+        ]
+        visible_text = " ".join(normalized_records)
+        header = post_reference.get("header_anchor", "")
+        if header:
+            if self.phrase_matches_text(header, visible_text):
+                return True
+            for candidate in normalized_records:
+                if len(candidate) < 3:
+                    continue
+                length_ratio = min(len(header), len(candidate)) / max(len(header), len(candidate))
+                if length_ratio >= 0.62 and SequenceMatcher(None, header, candidate).ratio() >= 0.82:
+                    return True
+            return False
+        timestamp = post_reference.get("timestamp_text", "")
+        matches = post_reference.get("matches", [])
+        timestamp_seen = bool(timestamp and self.phrase_matches_text(timestamp, visible_text))
+        match_seen = any(self.phrase_matches_text(value, visible_text) for value in matches)
+        return timestamp_seen and match_seen
+
     def find_post_match_snapshot(self, records, normalized_keywords, screen_size):
         if not records or not normalized_keywords or not screen_size:
             return None
@@ -3414,6 +3499,7 @@ class ProfessionalPhoneController:
                     "timestamp_y": timestamp_y,
                     "source": timestamp.get("source", record.get("source", "unknown")),
                     "fingerprint": self.normalize_search_text(preview or joined),
+                    "header_anchor": self.nearby_post_header_anchor(usable, timestamp, screen_size),
                 })
                 break
         if not candidates:
@@ -3799,7 +3885,7 @@ class ProfessionalPhoneController:
                         return candidate
         return None
 
-    def return_from_settings_to_post(self, device, screen_size=None, post_url=None):
+    def return_from_settings_to_post(self, device, screen_size=None, post_url=None, post_reference=None):
         """Regresa desde Ajustes y recupera exactamente la publicación original."""
         screen_size = screen_size or self.get_device_screen_size(device) or (1080, 1920)
         for _ in range(6):
@@ -3812,7 +3898,10 @@ class ProfessionalPhoneController:
             self.log(f"[{device}] No se recuperó Facebook después de leer el enlace en Ajustes.")
             return False
 
-        for step in range(6):
+        expected_header = (post_reference or {}).get("header_anchor", "")
+        if expected_header:
+            self.log(f"[{device}] Regreso dirigido al encabezado original: '{expected_header}'.")
+        for step in range(10):
             if self.search_stop_event.is_set():
                 return False
             hierarchy = self.get_android_hierarchy(device)
@@ -3840,16 +3929,21 @@ class ProfessionalPhoneController:
             elif (
                 self.is_open_post_view(records, screen_size)
                 or self.is_open_post_hierarchy(hierarchy, screen_size)
-            ):
+            ) and self.post_reference_matches(records, post_reference):
                 self.log(
-                    f"[{device}] Publicación original recuperada sin controles < inferiores; "
+                    f"[{device}] Publicación original recuperada por encabezado y sin controles < inferiores; "
                     "ya se puede buscar la fila de acciones."
                 )
                 return True
             else:
+                open_post = (
+                    self.is_open_post_view(records, screen_size)
+                    or self.is_open_post_hierarchy(hierarchy, screen_size)
+                )
+                reason = "publicación distinta al encabezado original" if open_post else "estado intermedio"
                 self.log(
-                    f"[{device}] Estado intermedio sin control < accesible; "
-                    f"se ejecuta un solo Atrás ({step + 1}/6) y se vuelve a inspeccionar."
+                    f"[{device}] {reason.capitalize()}; se ejecuta Atrás "
+                    f"({step + 1}/10) y se vuelve a comparar."
                 )
                 ok, detail = self.run_on_device(
                     device, ["shell", "input", "keyevent", "4"], timeout=15
@@ -3872,13 +3966,18 @@ class ProfessionalPhoneController:
                 return False
             if self.wait_or_cancel(1.4, self.search_stop_event):
                 return False
-            if self.confirm_actionable_open_post(device, screen_size, attempts=4, delay=0.65):
-                self.log(f"[{device}] Publicación original reabierta y confirmada mediante su enlace.")
+            if self.confirm_actionable_open_post(
+                device, screen_size, attempts=4, delay=0.65, post_reference=post_reference
+            ):
+                self.log(
+                    f"[{device}] Publicación original reabierta mediante su enlace y "
+                    "confirmada contra el encabezado guardado."
+                )
                 return True
         self.log(f"[{device}] No se logró recuperar una vista confirmada de la publicación.")
         return False
 
-    def capture_open_post_link(self, device, screen_size):
+    def capture_open_post_link(self, device, screen_size, post_reference=None):
         """Copia y lee el enlace de la publicación abierta sin instalar auxiliares."""
         if not screen_size or self.search_stop_event.is_set():
             return None
@@ -3982,7 +4081,9 @@ class ProfessionalPhoneController:
                 self.log(f"[{device}] El contenido pegado no fue un enlace válido de Facebook.")
             return url
         finally:
-            self.return_from_settings_to_post(device, screen_size, post_url=url)
+            self.return_from_settings_to_post(
+                device, screen_size, post_url=url, post_reference=post_reference
+            )
 
     def save_search_link_record(self, device, snapshot, url):
         if not url:
@@ -4142,10 +4243,18 @@ class ProfessionalPhoneController:
                 }
         return None
 
-    def scroll_to_post_action_row(self, device, screen_size, stop_event=None, max_scrolls=18):
+    def scroll_to_post_action_row(
+        self, device, screen_size, stop_event=None, max_scrolls=18, post_reference=None
+    ):
         """Desplaza desde una zona segura hasta confirmar la fila completa de acciones."""
         width, height = screen_size
-        if not self.confirm_actionable_open_post(device, screen_size, attempts=2, delay=0.35):
+        if not self.confirm_actionable_open_post(
+            device,
+            screen_size,
+            attempts=2,
+            delay=0.35,
+            post_reference=post_reference,
+        ):
             self.log(
                 f"[{device}] No se iniciará el scroll de acciones: la publicación limpia "
                 "todavía no está confirmada."
@@ -4223,12 +4332,16 @@ class ProfessionalPhoneController:
         self.log(f"[{device}] El toque se envió, pero Facebook no expuso confirmación visual.")
         return "sent_unconfirmed"
 
-    def perform_search_post_like(self, device):
+    def perform_search_post_like(self, device, post_reference=None):
         size = self.get_device_screen_size(device)
         if not size:
             return "screen_error"
         row = self.scroll_to_post_action_row(
-            device, size, stop_event=self.search_stop_event, max_scrolls=18
+            device,
+            size,
+            stop_event=self.search_stop_event,
+            max_scrolls=18,
+            post_reference=post_reference,
         )
         if not row:
             return "not_found"
@@ -4446,13 +4559,17 @@ class ProfessionalPhoneController:
         self.log(f"[{device}] La fila de acciones se revisó, pero el comentario reciente no apareció.")
         return "not_found"
 
-    def perform_search_post_comment_once(self, device, comment_text):
+    def perform_search_post_comment_once(self, device, comment_text, post_reference=None):
         size = self.get_device_screen_size(device)
         if not size:
             return "screen_error"
         width, height = size
         action_row = self.scroll_to_post_action_row(
-            device, size, stop_event=self.search_stop_event, max_scrolls=18
+            device,
+            size,
+            stop_event=self.search_stop_event,
+            max_scrolls=18,
+            post_reference=post_reference,
         )
         if not action_row:
             return "action_row_not_found"
@@ -4543,10 +4660,14 @@ class ProfessionalPhoneController:
             return "cancelled"
         return "sent" if self.published_comment_visible(device, comment_text, checks=5, delay=1.0) else "not_confirmed"
 
-    def perform_search_post_comment(self, device, comment_text):
+    def perform_search_post_comment(self, device, comment_text, post_reference=None):
         last_result = "not_confirmed"
         for attempt in range(2):
-            last_result = self.perform_search_post_comment_once(device, comment_text)
+            last_result = self.perform_search_post_comment_once(
+                device,
+                comment_text,
+                post_reference=post_reference if attempt == 0 else None,
+            )
             if last_result == "sent":
                 return "sent" if attempt == 0 else "sent_after_retry"
             if last_result == "cancelled" or self.search_stop_event.is_set():
@@ -4586,8 +4707,10 @@ class ProfessionalPhoneController:
                 return False
         return False
 
-    def confirm_actionable_open_post(self, device, screen_size, attempts=2, delay=0.45):
-        """Confirma publicación abierta y ausencia de un `<` intermedio inferior."""
+    def confirm_actionable_open_post(
+        self, device, screen_size, attempts=2, delay=0.45, post_reference=None
+    ):
+        """Confirma publicación, ausencia de `<` inferior e identidad del encabezado."""
         for attempt in range(max(1, attempts)):
             hierarchy = self.get_android_hierarchy(device)
             records = self.accessibility_text_records(hierarchy)
@@ -4609,7 +4732,14 @@ class ProfessionalPhoneController:
                 self.is_open_post_view(records, screen_size)
                 or self.is_open_post_hierarchy(hierarchy, screen_size)
             ):
-                return True
+                if self.post_reference_matches(records, post_reference):
+                    return True
+                expected = (post_reference or {}).get("header_anchor", "")
+                self.log(
+                    f"[{device}] Hay una publicación abierta, pero no coincide con el "
+                    f"encabezado guardado '{expected}'; no se iniciarán acciones."
+                )
+                return False
             if attempt + 1 < attempts and self.wait_or_cancel(delay, self.search_stop_event):
                 return False
         return False
@@ -4645,6 +4775,7 @@ class ProfessionalPhoneController:
         comment_text,
         like_min,
         like_max,
+        post_reference=None,
     ):
         """Ejecuta exclusivamente las acciones marcadas en la pestaña Búsqueda."""
         like_result = None
@@ -4664,10 +4795,12 @@ class ProfessionalPhoneController:
         if self.wait_or_cancel(chosen_wait, self.search_stop_event):
             return "cancelled" if like_on_match else None, "cancelled" if comment_on_match else None
         if like_on_match:
-            like_result = self.perform_search_post_like(device)
+            like_result = self.perform_search_post_like(device, post_reference=post_reference)
         if comment_on_match and not self.search_stop_event.is_set():
             comment_result = self.perform_search_post_comment(
-                device, self.parse_spintax(comment_text)
+                device,
+                self.parse_spintax(comment_text),
+                post_reference=None if like_on_match else post_reference,
             )
         return like_result, comment_result
 
@@ -4789,22 +4922,33 @@ class ProfessionalPhoneController:
                     link_added = False
                     like_result = None
                     comment_result = None
+                    post_reference = self.post_reference_from_snapshot(snapshot)
                     if should_open_post:
                         if not self.open_search_match_post(dev, snapshot, size):
                             seen.discard(fingerprint)
                             continue
                         if save_link_on_match:
-                            post_url = self.capture_open_post_link(dev, size)
+                            post_url = self.capture_open_post_link(
+                                dev, size, post_reference=post_reference
+                            )
                             record_path, link_added = self.save_search_link_record(dev, snapshot, post_url)
                         if like_on_match or comment_on_match:
-                            post_ready = self.confirm_actionable_open_post(dev, size, attempts=2)
+                            post_ready = self.confirm_actionable_open_post(
+                                dev,
+                                size,
+                                attempts=2,
+                                post_reference=post_reference,
+                            )
                             if not post_ready:
                                 self.log(
                                     f"[{dev}] Después de obtener el enlace no se confirmó la publicación; "
                                     "se intentará recuperar la pantalla intermedia antes de las acciones."
                                 )
                                 post_ready = self.return_from_settings_to_post(
-                                    dev, size, post_url=post_url
+                                    dev,
+                                    size,
+                                    post_url=post_url,
+                                    post_reference=post_reference,
                                 )
                             if post_ready:
                                 like_result, comment_result = self.perform_selected_search_actions(
@@ -4814,6 +4958,7 @@ class ProfessionalPhoneController:
                                     comment_text,
                                     like_min,
                                     like_max,
+                                    post_reference=post_reference,
                                 )
                             else:
                                 self.log(

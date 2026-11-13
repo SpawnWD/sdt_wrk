@@ -21,6 +21,34 @@ Esta bitácora registra el estado base del proyecto y todos los cambios que se r
 
 ## Cambios completados
 
+### CHG-20261112-2030 — Recuperación de la publicación original por encabezado
+
+- Fecha y hora de inicio: 2026-11-12 20:30:27 (America/Mexico_City)
+- Estado: Completado localmente el 2026-11-12 20:38:00 (America/Mexico_City)
+- Tipo: Corrección de navegación posterior a la captura del enlace
+- Solicitud: Después de obtener el enlace, ejecutar Atrás y comparar cada pantalla hasta regresar a la publicación original identificada por su encabezado; sólo entonces iniciar el scroll que localiza Me gusta.
+- Diagnóstico: confirmar únicamente que existe una vista de publicación no distingue la publicación original de capas o publicaciones anidadas que conservan elementos similares.
+- Alcance: guardar una referencia del encabezado y contenido antes de abrir los menús, validar esa identidad durante cada regreso, limitar los retrocesos, reabrir el enlace como recuperación y bloquear el scroll/Me gusta mientras no coincida la publicación.
+- Riesgo controlado: evitar retroceder más allá del feed o actuar en otra publicación; no se tocó Me gusta durante las pruebas locales.
+- Referencia de rollback: commit `a3ca34d` de la rama `integracion`.
+- Implementación:
+  - Extrae el nombre estable del encabezado situado antes de la fecha/hora y admite que nombre y fecha vengan en nodos separados.
+  - Conserva esa referencia junto con las palabras coincidentes y la fecha de la publicación antes de abrir menús o Ajustes.
+  - Tras obtener el enlace, compara hasta diez pantallas: una publicación con encabezado distinto provoca otro Atrás; un `<` inferior se resuelve primero; llegar al feed activa la reapertura segura mediante el enlace capturado.
+  - La publicación sólo queda lista cuando coincide el encabezado original, no existe un `<` inferior y se confirma la estructura de publicación abierta.
+  - El primer scroll hacia la fila Me gusta/Comentar/Compartir vuelve a validar la misma referencia. En una ejecución combinada, la validación se hace antes del primer scroll para no exigir que el encabezado siga visible después de desplazarse.
+- Pruebas realizadas:
+  - Caso simulado con una publicación `Canal 19` seguida de `Farmacia Monte de Yavé`: ejecutó exactamente un Atrás y sólo aceptó la segunda al coincidir el encabezado.
+  - Captura real del teléfono conectado: la publicación exterior `Informativo Alcance · 1 h` fue distinguida de la publicación compartida `Alcance Informativo`; la referencia resultante fue `informativo alcance` y coincidió con la pantalla original.
+  - Compilación de `panel.py` y `license_guard.py`, `git diff --check`, comparación de hash y construcción PyInstaller: correctos.
+  - No se ejecutaron Me gusta ni Comentario durante las pruebas.
+- Archivos modificados: `panel.py`, `LEEME.txt`, `Construir Ejecutable.ps1` y `BITACORA.md`.
+- Entrega: `release_1.88.7/AdministracionDeMoviles.exe` (87,079,045 bytes) y `SHA256.txt`.
+- SHA-256: `64E7128D2AEBC470D925BDB229EFDCA0A481E42052E12658B0C70A8304AA4175`.
+- Commit resultante: el commit de la rama `integracion` que contiene esta entrada.
+- Publicado o respaldado: pendiente de publicación en `integracion`.
+- Procedimiento de rollback: revertir el commit resultante o restaurar `a3ca34d` en una rama de recuperación.
+
 ### CHG-20261112-2015 — Validación del regreso intermedio antes del scroll de acciones
 
 - Fecha y hora de inicio: 2026-11-12 20:15:39 (America/Mexico_City)
