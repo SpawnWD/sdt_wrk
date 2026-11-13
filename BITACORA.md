@@ -56,8 +56,8 @@ Esta bitácora registra el estado base del proyecto y todos los cambios que se r
 - Archivos modificados: `panel.py`, `LEEME.txt`, `Construir Ejecutable.ps1` y `BITACORA.md`.
 - Entrega: `release_1.88.16/AdministracionDeMoviles.exe` (87,090,188 bytes) y `SHA256.txt`.
 - SHA-256: `E5C9C13D2B157A343A9AE466DFD5B896F22AF71FA22A5C0451A860175600B24F`.
-- Commit resultante: pendiente de crear.
-- Publicado o respaldado: pendiente de publicación en `integracion`.
+- Commit funcional resultante: `e1a83aa` (`fix: validar vivo y cabecera de publicacion`).
+- Publicado o respaldado: Sí; cambio funcional publicado en la rama `integracion` de GitHub.
 - Procedimiento de rollback: revertir el commit resultante o restaurar `c8c7b91` en una rama de recuperación.
 
 ### CHG-20261113-0751 — Rotación de la contraseña dinámica de activación
