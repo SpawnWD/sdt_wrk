@@ -3617,6 +3617,62 @@ class ProfessionalPhoneController:
             return geometric[0][1]
         return None
 
+    def find_calculated_comment_send_point(self, hierarchy, screen_size):
+        """Localiza el control más derecho alineado con el editor inferior."""
+        if hierarchy is None or not screen_size:
+            return None
+        screen_width, screen_height = screen_size
+        editors = []
+        for node in hierarchy.iter("node"):
+            class_name = node.attrib.get("class", "").casefold()
+            editable = node.attrib.get("editable", "false").casefold() == "true"
+            if not ("edittext" in class_name or "autocompletetextview" in class_name or editable):
+                continue
+            bounds = self.parse_node_bounds(node)
+            if not bounds:
+                continue
+            left, top, right, bottom = bounds
+            center_y = (top + bottom) // 2
+            if center_y >= screen_height * 0.55:
+                editors.append((center_y, right - left, bounds))
+        if not editors:
+            return None
+        editors.sort(key=lambda item: (item[0], item[1]), reverse=True)
+        editor_left, editor_top, editor_right, editor_bottom = editors[0][2]
+        editor_center_y = (editor_top + editor_bottom) // 2
+        editor_height = editor_bottom - editor_top
+        candidates = []
+        for node in hierarchy.iter("node"):
+            if node.attrib.get("clickable", "false").casefold() != "true":
+                continue
+            if node.attrib.get("enabled", "true").casefold() == "false":
+                continue
+            if node.attrib.get("visible-to-user", "true").casefold() == "false":
+                continue
+            bounds = self.parse_node_bounds(node)
+            if not bounds:
+                continue
+            left, top, right, bottom = bounds
+            box_width, box_height = right - left, bottom - top
+            center = ((left + right) // 2, (top + bottom) // 2)
+            vertical_overlap = max(0, min(bottom, editor_bottom) - max(top, editor_top))
+            if center[0] <= editor_right or center[0] < screen_width * 0.65:
+                continue
+            if abs(center[1] - editor_center_y) > max(editor_height, box_height) * 0.75:
+                continue
+            if vertical_overlap < min(editor_height, box_height) * 0.35:
+                continue
+            if not screen_width * 0.035 <= box_width <= screen_width * 0.18:
+                continue
+            if not screen_height * 0.012 <= box_height <= screen_height * 0.09:
+                continue
+            candidates.append((center[0], vertical_overlap, center, bounds))
+        if not candidates:
+            return None
+        candidates.sort(key=lambda item: (item[0], item[1]), reverse=True)
+        _, _, point, bounds = candidates[0]
+        return {"point": point, "bounds": bounds, "editor_bounds": editors[0][2]}
+
     def find_keyword_anchor_y(self, hierarchy, normalized_keywords):
         for node in hierarchy.iter("node"):
             if node.attrib.get("visible-to-user", "true").casefold() == "false":
@@ -4712,6 +4768,8 @@ class ProfessionalPhoneController:
             return "cancelled"
         text_verified = self.visible_text_contains(device, comment_text)
         if not text_verified:
+            text_verified = self.ocr_visible_text_contains(device, comment_text)
+        if not text_verified:
             text_verified = bool(self.locate_blue_send_arrow(self.capture_device_screen(device)))
         if not text_verified:
             self.clear_focused_text(device, len(comment_text))
@@ -4730,10 +4788,31 @@ class ProfessionalPhoneController:
             )
             if not ok:
                 return "send_error"
-        elif not self.tap_blue_send_arrow(
-            device, attempts=3, delay=0.45, stop_event=self.search_stop_event
-        ):
-            return "send_not_found"
+        else:
+            sent = self.tap_blue_send_arrow(
+                device, attempts=3, delay=0.45, stop_event=self.search_stop_event
+            )
+            if not sent:
+                hierarchy = self.get_android_hierarchy(device)
+                calculated_send = self.find_calculated_comment_send_point(hierarchy, size)
+                if not calculated_send:
+                    return "send_not_found"
+                send_x, send_y = calculated_send["point"]
+                ok, detail = self.run_on_device(
+                    device,
+                    ["shell", "input", "tap", str(send_x), str(send_y)],
+                    timeout=15,
+                )
+                if not ok:
+                    self.log(
+                        f"[{device}] Se calculó el botón derecho de envío, "
+                        f"pero el toque falló: {detail}"
+                    )
+                    return "send_error"
+                self.log(
+                    f"[{device}] Botón de envío calculado pulsado en ({send_x}, {send_y}); "
+                    f"editor {calculated_send['editor_bounds']} y control {calculated_send['bounds']}."
+                )
         if self.wait_or_cancel(1.5, self.search_stop_event):
             return "cancelled"
         return "sent" if self.published_comment_visible(device, comment_text, checks=5, delay=1.0) else "not_confirmed"
@@ -5771,6 +5850,16 @@ class ProfessionalPhoneController:
             return False
         visible = self.normalize_search_text(self.extract_visible_text(hierarchy))
         expected = self.normalize_search_text(expected_text).strip()
+        return bool(expected) and expected in visible
+
+    def ocr_visible_text_contains(self, device, expected_text):
+        records = self.windows_ocr_records(device)
+        visible = self.normalize_search_text(
+            " ".join(record.get("text", "") for record in records)
+        )
+        visible = re.sub(r"\s+", " ", visible).strip()
+        expected = self.normalize_search_text(expected_text).strip()
+        expected = re.sub(r"\s+", " ", expected)
         return bool(expected) and expected in visible
 
     def capture_device_screen(self, device):

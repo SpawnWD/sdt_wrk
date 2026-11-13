@@ -21,6 +21,36 @@ Esta bitácora registra el estado base del proyecto y todos los cambios que se r
 
 ## Cambios completados
 
+### CHG-20261113-0130 — Botón de envío alineado con el campo de comentario
+
+- Fecha y hora de inicio: 2026-11-13 01:30:11 (America/Mexico_City)
+- Estado: Completado localmente el 2026-11-13 01:33:03 (America/Mexico_City)
+- Tipo: Corrección del envío de comentarios en Búsqueda
+- Solicitud: Asegurar que, después de escribir el comentario, se pulse el botón de envío situado unos píxeles antes del borde derecho y alineado con el campo.
+- Diagnóstico real: en la pantalla actual Facebook Lite expone `MultiAutoCompleteTextView` en `[116,1392][472,1428]` y tres controles pulsables sin texto a su derecha. El último está en `[626,1396][702,1428]`, centro `(664,1412)`, pero no tiene `text` ni `content-desc`; por ello puede escapar tanto al detector accesible como al reconocimiento de la flecha azul.
+- Alcance: cálculo geométrico del control derecho alineado con el editor, uso sólo después de validar el texto escrito, prioridad de controles accesibles/flecha azul y confirmación posterior existente.
+- Riesgo controlado: no tocar el botón derecho si el texto no fue verificado o si no existe una fila inferior coherente.
+- Referencia de rollback: commit `1694574` de la rama `integracion`.
+- Implementación:
+  - Añade verificación OCR del comentario escrito cuando Facebook Lite no expone el contenido del editor por accesibilidad.
+  - Localiza el `MultiAutoCompleteTextView` inferior y recopila exclusivamente controles pulsables visibles, habilitados y alineados verticalmente a su derecha.
+  - Selecciona el control más cercano al borde derecho; en la jerarquía real calculó `(664,1412)` dentro de `[626,1396][702,1428]`.
+  - Conserva la prioridad: botón Publicar/Enviar accesible, flecha azul visual y finalmente el botón derecho calculado.
+  - El cálculo sólo se ejecuta después de confirmar que el comentario fue escrito; sin editor o sin texto no realiza el toque.
+  - Después del toque conserva la validación de publicación y el mecanismo contra comentarios duplicados.
+- Pruebas realizadas:
+  - Jerarquía real: editor `[116,1392][472,1428]`, control derecho `[626,1396][702,1428]`, centro `(664,1412)`.
+  - Texto OCR dividido en dos líneas reconstruido y validado correctamente.
+  - Caso negativo sin editor: no generó punto de envío.
+  - Compilación de `panel.py` y `license_guard.py`, `git diff --check`, hash y construcción PyInstaller: correctos.
+  - No se publicó un comentario inventado durante las pruebas.
+- Archivos modificados: `panel.py`, `LEEME.txt`, `Construir Ejecutable.ps1` y `BITACORA.md`.
+- Entrega: `release_1.88.11/AdministracionDeMoviles.exe` (87,080,674 bytes) y `SHA256.txt`.
+- SHA-256: `48065FA8B62B9716233C540FEFF25CF90C864215C46967716DB37EB7CE639B4F`.
+- Commit resultante: el commit de la rama `integracion` que contiene esta entrada.
+- Publicado o respaldado: pendiente de publicación en `integracion`.
+- Procedimiento de rollback: revertir el commit resultante o restaurar `1694574` en una rama de recuperación.
+
 ### CHG-20261113-0100 — Validación previa al desplazamiento
 
 - Fecha y hora de inicio: 2026-11-13 01:00:18 (America/Mexico_City)

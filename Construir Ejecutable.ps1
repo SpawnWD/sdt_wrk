@@ -1,8 +1,8 @@
 $ErrorActionPreference = "Stop"
 
 $projectRoot = (Resolve-Path -LiteralPath $PSScriptRoot).Path
-$buildPath = Join-Path $projectRoot "build_1.88.10"
-$releasePath = Join-Path $projectRoot "release_1.88.10"
+$buildPath = Join-Path $projectRoot "build_1.88.11"
+$releasePath = Join-Path $projectRoot "release_1.88.11"
 $panelPath = Join-Path $projectRoot "panel.py"
 $templatesPath = Join-Path $projectRoot "templates"
 $toolsPath = Join-Path $projectRoot "herramientas"
