@@ -21,6 +21,35 @@ Esta bitácora registra el estado base del proyecto y todos los cambios que se r
 
 ## Cambios completados
 
+### CHG-20261113-0100 — Validación previa al desplazamiento
+
+- Fecha y hora de inicio: 2026-11-13 01:00:18 (America/Mexico_City)
+- Estado: Completado localmente el 2026-11-13 01:02:47 (America/Mexico_City)
+- Tipo: Corrección del orden de análisis en Búsqueda
+- Solicitud: Al iniciar Búsqueda, validar el texto visible antes de ejecutar el primer scroll.
+- Diagnóstico: el ciclo normalmente analizaba antes de desplazarse, pero `scroll_ready` iniciaba en verdadero; una excepción de OCR/análisis podía llegar al bloque final y permitir scroll sin validación. Además, después de regresar de una publicación al feed, el mismo ciclo podía desplazarse sin analizar nuevamente la pantalla recuperada.
+- Alcance: guardián de validación por dispositivo y ciclo, registro explícito de la primera lectura, bloqueo tras errores o regresos al feed y liberación del scroll sólo después de analizar la pantalla actual.
+- Riesgo controlado: cada nuevo ciclo vuelve a intentar la validación, por lo que un error transitorio no bloquea permanentemente un teléfono saludable.
+- Referencia de rollback: commit `f2c0405` de la rama `integracion`.
+- Implementación:
+  - Añade `initial_text_validation` por dispositivo para registrar y controlar la primera lectura.
+  - Añade `text_validated_this_cycle`, reiniciado en cada ciclo y falso por defecto.
+  - Sólo autoriza el gesto de scroll cuando accesibilidad/OCR y la evaluación de palabras o publicidad terminaron en la pantalla actual.
+  - Una excepción deja el guardián en falso y aplaza el desplazamiento.
+  - Después de regresar de una publicación al feed invalida el resultado anterior; el ciclo siguiente debe analizar el nuevo texto antes de mover la pantalla.
+- Pruebas realizadas:
+  - Caso normal sin coincidencia: orden observado `validar → scroll`.
+  - Error simulado de análisis: no se ejecutó scroll y quedó registrado `Scroll aplazado`.
+  - Coincidencia abierta y regreso al feed: no hubo scroll en el mismo ciclo; quedó exigida una nueva validación.
+  - Compilación de `panel.py` y `license_guard.py`, `git diff --check`, hash y construcción PyInstaller: correctos.
+  - No se ejecutaron Me gusta ni Comentario durante estas pruebas.
+- Archivos modificados: `panel.py`, `LEEME.txt`, `Construir Ejecutable.ps1` y `BITACORA.md`.
+- Entrega: `release_1.88.10/AdministracionDeMoviles.exe` (87,079,083 bytes) y `SHA256.txt`.
+- SHA-256: `EB967A375C9ACD6C46159832E96668D2E4F0214978807A6CC94012DEEACE93C1`.
+- Commit resultante: el commit de la rama `integracion` que contiene esta entrada.
+- Publicado o respaldado: pendiente de publicación en `integracion`.
+- Procedimiento de rollback: revertir el commit resultante o restaurar `f2c0405` en una rama de recuperación.
+
 ### CHG-20261113-0046 — Acción garantizada sobre el vínculo capturado
 
 - Fecha y hora de inicio: 2026-11-13 00:46:12 (America/Mexico_City)

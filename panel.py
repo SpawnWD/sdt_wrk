@@ -4949,11 +4949,18 @@ class ProfessionalPhoneController:
         found_count = 0
         ad_guard = {device: 0 for device in devices}
         scroll_ready = {device: True for device in devices}
+        initial_text_validation = {device: True for device in devices}
         while not self.search_stop_event.is_set() and (continuous or step < max_scrolls):
             stop_after_match = False
+            text_validated_this_cycle = {device: False for device in devices}
             for dev in devices:
                 if self.search_stop_event.is_set(): break
                 try:
+                    if initial_text_validation.get(dev, False):
+                        self.log(
+                            f"[{dev}] Validación inicial: analizando el texto visible "
+                            "antes de permitir el primer scroll."
+                        )
                     size = self.get_device_screen_size(dev)
                     if not size:
                         continue
@@ -4967,15 +4974,31 @@ class ProfessionalPhoneController:
                             "se regresa al feed sin ejecutar acciones."
                         )
                         scroll_ready[dev] = self.return_to_feed_after_post(dev)
+                        text_validated_this_cycle[dev] = False
                         ad_guard[dev] = 2
                         self.wait_or_cancel(1.2, self.search_stop_event)
                         continue
                     ad_visible = any(self.is_ad_label_record(record) for record in records)
                     if ad_visible:
+                        text_validated_this_cycle[dev] = True
+                        if initial_text_validation.get(dev, False):
+                            initial_text_validation[dev] = False
+                            self.log(
+                                f"[{dev}] Validación inicial completada: el texto visible "
+                                "corresponde a publicidad y se ignorará antes del scroll."
+                            )
                         ad_guard[dev] = 2
                         self.log(f"[{dev}] Publicidad detectada; se ignora el bloque completo y su continuación.")
                         continue
                     snapshot = self.find_post_match_snapshot(records, norm_keys, size)
+                    text_validated_this_cycle[dev] = True
+                    if initial_text_validation.get(dev, False):
+                        initial_text_validation[dev] = False
+                        result_text = "con coincidencia" if snapshot is not None else "sin coincidencia"
+                        self.log(
+                            f"[{dev}] Validación inicial de texto completada {result_text}; "
+                            "el primer scroll sólo se permitirá después de este resultado."
+                        )
                     if ad_guard[dev] > 0:
                         if snapshot is None:
                             ad_guard[dev] -= 1
@@ -5109,6 +5132,9 @@ class ProfessionalPhoneController:
                     if should_open_post:
                         returned_to_feed = self.return_to_feed_after_post(dev)
                         scroll_ready[dev] = returned_to_feed
+                        # La pantalla cambió al regresar. Debe analizarse el texto
+                        # del feed recuperado en un ciclo nuevo antes de desplazar.
+                        text_validated_this_cycle[dev] = False
                         if not returned_to_feed:
                             ad_guard[dev] = 2
                     if not continuous:
@@ -5118,8 +5144,17 @@ class ProfessionalPhoneController:
             if stop_after_match or self.search_stop_event.is_set():
                 break
             for dev in devices:
-                if not self.search_stop_event.is_set() and scroll_ready.get(dev, True):
+                if (
+                    not self.search_stop_event.is_set()
+                    and scroll_ready.get(dev, True)
+                    and text_validated_this_cycle.get(dev, False)
+                ):
                     self.scroll_device_once_random(dev)
+                elif not self.search_stop_event.is_set() and scroll_ready.get(dev, True):
+                    self.log(
+                        f"[{dev}] Scroll aplazado: primero debe completarse la validación "
+                        "del texto de la pantalla actual."
+                    )
             step += 1
             if self.search_stop_event.wait(2.0):
                 break
