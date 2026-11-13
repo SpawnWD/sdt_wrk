@@ -21,6 +21,34 @@ Esta bitácora registra el estado base del proyecto y todos los cambios que se r
 
 ## Cambios completados
 
+### CHG-20261112-2103 — Acciones sobre el enlace recuperado desde el feed
+
+- Fecha y hora de inicio: 2026-11-12 21:03:26 (America/Mexico_City)
+- Estado: Completado localmente el 2026-11-12 23:34:20 (America/Mexico_City)
+- Tipo: Corrección del flujo posterior a la captura del enlace
+- Solicitud: Si el regreso no encuentra la publicación original y llega al feed, abrir el enlace obtenido y ejecutar sobre esa publicación Me gusta y/o Comentario según la configuración.
+- Diagnóstico: el enlace ya se reabría como último recurso, pero la comprobación posterior volvía a exigir el encabezado anterior y podía retroceder de nuevo aunque la URL exacta hubiera abierto la publicación correcta.
+- Alcance: conservar por dispositivo el resultado del retorno, aceptar como identidad fuerte la URL copiada después de abrirla explícitamente, confirmar una publicación limpia y entregar ese estado al ejecutor de acciones.
+- Riesgo controlado: no ejecutar acciones si la URL no es válida o Facebook no confirma una publicación abierta; conservar el botón Detener y las selecciones actuales.
+- Referencia de rollback: commit `811d04c` de la rama `integracion`.
+- Implementación:
+  - Añade un estado de recuperación independiente para cada teléfono conectado.
+  - Si el regreso encuentra el encabezado original, conserva la validación estricta anterior.
+  - Si llega al feed o agota los regresos, abre explícitamente la URL capturada mediante Facebook.
+  - Después de abrir esa URL, la dirección exacta funciona como identidad fuerte y sólo se exige una publicación limpia, sin capas ni `<` inferiores.
+  - El trabajador recibe el resultado de recuperación y evita retroceder otra vez; Me gusta y/o Comentario se ejecutan sobre la publicación abierta desde el enlace según las casillas seleccionadas.
+- Pruebas realizadas:
+  - Caso simulado feed → URL válida → publicación limpia: abrió exactamente la URL, confirmó el estado `ready/via_url` y la entregó como destino de acciones.
+  - Caso negativo con URL ajena a Facebook: no ejecutó `android.intent.action.VIEW` y no habilitó acciones.
+  - Compilación de `panel.py` y `license_guard.py`, `git diff --check`, verificación de hash y construcción PyInstaller: correctos.
+  - No se ejecutaron Me gusta ni Comentario durante las pruebas.
+- Archivos modificados: `panel.py`, `LEEME.txt`, `Construir Ejecutable.ps1` y `BITACORA.md`.
+- Entrega: `release_1.88.8/AdministracionDeMoviles.exe` (87,079,555 bytes) y `SHA256.txt`.
+- SHA-256: `6AC8A13EA8BD8E3B174AE036A5F1944E78C70F3BE7C5F14E84B865E94E359CE0`.
+- Commit resultante: el commit de la rama `integracion` que contiene esta entrada.
+- Publicado o respaldado: pendiente de publicación en `integracion`.
+- Procedimiento de rollback: revertir el commit resultante o restaurar `811d04c` en una rama de recuperación.
+
 ### CHG-20261112-2030 — Recuperación de la publicación original por encabezado
 
 - Fecha y hora de inicio: 2026-11-12 20:30:27 (America/Mexico_City)

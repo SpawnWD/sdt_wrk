@@ -145,6 +145,7 @@ class ProfessionalPhoneController:
         self.device_log_status_vars = {}
         self.search_devices = []
         self.pending_search_match = None
+        self.search_link_recovery = {}
         self.sequence_steps = []
         self.sequence_capture_size = None
         self.sequence_display_geometry = None
@@ -3887,6 +3888,11 @@ class ProfessionalPhoneController:
 
     def return_from_settings_to_post(self, device, screen_size=None, post_url=None, post_reference=None):
         """Regresa desde Ajustes y recupera exactamente la publicación original."""
+        self.search_link_recovery[device] = {
+            "ready": False,
+            "via_url": False,
+            "post_url": post_url or "",
+        }
         screen_size = screen_size or self.get_device_screen_size(device) or (1080, 1920)
         for _ in range(6):
             if self.facebook_is_foreground(device):
@@ -3934,6 +3940,11 @@ class ProfessionalPhoneController:
                     f"[{device}] Publicación original recuperada por encabezado y sin controles < inferiores; "
                     "ya se puede buscar la fila de acciones."
                 )
+                self.search_link_recovery[device] = {
+                    "ready": True,
+                    "via_url": False,
+                    "post_url": post_url or "",
+                }
                 return True
             else:
                 open_post = (
@@ -3966,19 +3977,32 @@ class ProfessionalPhoneController:
                 return False
             if self.wait_or_cancel(1.4, self.search_stop_event):
                 return False
+            # La URL acaba de ser abierta explícitamente y por ello actúa como
+            # identidad fuerte del post. En esta ruta sólo exigimos que Facebook
+            # muestre una publicación limpia, no que OCR repita el encabezado.
             if self.confirm_actionable_open_post(
-                device, screen_size, attempts=4, delay=0.65, post_reference=post_reference
+                device, screen_size, attempts=4, delay=0.65, post_reference=None
             ):
                 self.log(
-                    f"[{device}] Publicación original reabierta mediante su enlace y "
-                    "confirmada contra el encabezado guardado."
+                    f"[{device}] El feed no conservó la publicación original; el enlace capturado "
+                    "abrió una publicación limpia y será el destino de las acciones configuradas."
                 )
+                self.search_link_recovery[device] = {
+                    "ready": True,
+                    "via_url": True,
+                    "post_url": post_url,
+                }
                 return True
         self.log(f"[{device}] No se logró recuperar una vista confirmada de la publicación.")
         return False
 
     def capture_open_post_link(self, device, screen_size, post_reference=None):
         """Copia y lee el enlace de la publicación abierta sin instalar auxiliares."""
+        self.search_link_recovery[device] = {
+            "ready": False,
+            "via_url": False,
+            "post_url": "",
+        }
         if not screen_size or self.search_stop_event.is_set():
             return None
         width, height = screen_size
@@ -4923,6 +4947,7 @@ class ProfessionalPhoneController:
                     like_result = None
                     comment_result = None
                     post_reference = self.post_reference_from_snapshot(snapshot)
+                    self.search_link_recovery.pop(dev, None)
                     if should_open_post:
                         if not self.open_search_match_post(dev, snapshot, size):
                             seen.discard(fingerprint)
@@ -4933,12 +4958,21 @@ class ProfessionalPhoneController:
                             )
                             record_path, link_added = self.save_search_link_record(dev, snapshot, post_url)
                         if like_on_match or comment_on_match:
-                            post_ready = self.confirm_actionable_open_post(
-                                dev,
-                                size,
-                                attempts=2,
-                                post_reference=post_reference,
-                            )
+                            recovery = self.search_link_recovery.pop(dev, {})
+                            post_ready = bool(recovery.get("ready"))
+                            action_reference = None if recovery.get("via_url") else post_reference
+                            if post_ready and recovery.get("via_url"):
+                                self.log(
+                                    f"[{dev}] Se usarán Me gusta/Comentario sobre la publicación "
+                                    "abierta desde el enlace capturado."
+                                )
+                            if not post_ready:
+                                post_ready = self.confirm_actionable_open_post(
+                                    dev,
+                                    size,
+                                    attempts=2,
+                                    post_reference=post_reference,
+                                )
                             if not post_ready:
                                 self.log(
                                     f"[{dev}] Después de obtener el enlace no se confirmó la publicación; "
@@ -4950,6 +4984,13 @@ class ProfessionalPhoneController:
                                     post_url=post_url,
                                     post_reference=post_reference,
                                 )
+                                recovery = self.search_link_recovery.pop(dev, {})
+                                if post_ready and recovery.get("via_url"):
+                                    action_reference = None
+                                    self.log(
+                                        f"[{dev}] Recuperación por URL confirmada; las acciones "
+                                        "se ejecutarán sobre ese enlace."
+                                    )
                             if post_ready:
                                 like_result, comment_result = self.perform_selected_search_actions(
                                     dev,
@@ -4958,7 +4999,7 @@ class ProfessionalPhoneController:
                                     comment_text,
                                     like_min,
                                     like_max,
-                                    post_reference=post_reference,
+                                    post_reference=action_reference,
                                 )
                             else:
                                 self.log(
