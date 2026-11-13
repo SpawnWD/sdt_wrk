@@ -1850,6 +1850,30 @@ class ProfessionalPhoneController:
         )
         return any(re.search(pattern, value, re.IGNORECASE) for pattern in true_markers)
 
+    @staticmethod
+    def comment_editor_focused_from_diagnostics(output):
+        """Confirma el editor de comentario sin iniciar UiAutomation en Android."""
+        value = str(output or "")
+        input_shown = bool(re.search(r"\bmInputShown\s*=\s*true\b", value, re.IGNORECASE))
+        focused_editor = bool(re.search(
+            r"mServedView\s*=.*(?:MultiAutoCompleteTextView|EditText)",
+            value,
+            re.IGNORECASE,
+        ))
+        return input_shown and focused_editor
+
+    def wait_for_focused_comment_editor(self, device, attempts=5, delay=0.25):
+        """Espera el foco real sin provocar el parpadeo del teclado con uiautomator."""
+        for attempt in range(max(1, int(attempts))):
+            ok, diagnostics = self.run_on_device(
+                device, ["shell", "dumpsys", "input_method"], timeout=15
+            )
+            if ok and self.comment_editor_focused_from_diagnostics(diagnostics):
+                return True
+            if attempt + 1 < attempts and self.wait_or_cancel(delay, self.search_stop_event):
+                return False
+        return False
+
     def is_keyboard_visible(self, device):
         ok, diagnostics = self.run_on_device(device, ["shell", "dumpsys", "input_method"], timeout=15)
         if ok and self.keyboard_visible_from_diagnostics(diagnostics):
@@ -4720,65 +4744,64 @@ class ProfessionalPhoneController:
         self.log(
             f"[{device}] Comentar pulsado en {action_point} dentro de la fila completa confirmada."
         )
-        if self.wait_or_cancel(0.9, self.search_stop_event):
+        if self.wait_or_cancel(0.65, self.search_stop_event):
             return "cancelled"
-        comment_point = None
-        comment_opened = True
-        for attempt in range(9):
+        editor_focused = self.wait_for_focused_comment_editor(device)
+        if not editor_focused:
+            # La fila ya fue pulsada. Aquí sólo se acepta un editor real; volver
+            # a tocar una etiqueta "Comentar" puede cerrar el teclado otra vez.
             hierarchy = self.get_android_hierarchy(device)
-            comment_point = self.find_accessible_control(
-                hierarchy,
-                exact_labels=("escribe un comentario", "write a comment", "comenta como", "comment as"),
-                prefix_labels=("escribe un comentario", "write a comment", "comenta como", "comentar como", "comment as", "add a comment"),
-                screen_size=size,
-                ignore_top_pct=0.20,
-                allow_nonclickable=True,
-            ) or self.find_bottom_editable_control(hierarchy, size)
-            if comment_point:
-                break
-            if not comment_opened:
-                result = self.apply_calculated_figure_action(device, "comment", self.search_stop_event)
-                if result == "sent":
-                    comment_opened = True
-                    if self.wait_or_cancel(1.3, self.search_stop_event):
-                        return "cancelled"
-                    continue
-            if attempt < 8:
-                ok, _ = self.run_on_device(
-                    device,
-                    ["shell", "input", "swipe", str(width//2), str(int(height*0.72)), str(width//2), str(int(height*0.34)), "650"],
-                    timeout=15,
-                )
-                if not ok or self.wait_or_cancel(0.9, self.search_stop_event):
-                    break
-        if not comment_point:
-            return "field_not_found"
-        ok, _ = self.run_on_device(
-            device, ["shell", "input", "tap", str(comment_point[0]), str(comment_point[1])], timeout=15
-        )
-        if not ok or self.wait_or_cancel(0.8, self.search_stop_event):
-            return "field_error"
-        if not self.clear_focused_text(device, 500):
+            comment_point = self.find_bottom_editable_control(hierarchy, size)
+            if not comment_point:
+                return "field_not_found"
+            ok, _ = self.run_on_device(
+                device,
+                ["shell", "input", "tap", str(comment_point[0]), str(comment_point[1])],
+                timeout=15,
+            )
+            if not ok or self.wait_or_cancel(0.45, self.search_stop_event):
+                return "field_error"
+            editor_focused = self.wait_for_focused_comment_editor(device)
+        if not editor_focused:
+            self.log(f"[{device}] El editor no conservó el foco; no se escribirá el comentario.")
+            return "field_not_focused"
+        if not self.clear_verified_focused_comment_text(device):
             return "clear_error"
-        if self.wait_or_cancel(0.3, self.search_stop_event):
+        if self.wait_or_cancel(0.2, self.search_stop_event):
             return "cancelled"
         if not self.inject_text_adb(
             device,
             comment_text,
-            character_delay=0.300,
+            character_delay=(0.080, 0.220, 0.020),
             stop_event=self.search_stop_event,
         ):
             return "write_error"
         if self.wait_or_cancel(0.9, self.search_stop_event):
             return "cancelled"
-        text_verified = self.visible_text_contains(device, comment_text)
+        # OCR y captura no reinician UiAutomation, por lo que conservan estable
+        # el teclado hasta pulsar Enviar.
+        text_verified = self.ocr_visible_text_contains(device, comment_text)
+        send_arrow = self.locate_blue_send_arrow(self.capture_device_screen(device))
         if not text_verified:
-            text_verified = self.ocr_visible_text_contains(device, comment_text)
-        if not text_verified:
-            text_verified = bool(self.locate_blue_send_arrow(self.capture_device_screen(device)))
+            text_verified = bool(send_arrow)
         if not text_verified:
             self.clear_focused_text(device, len(comment_text))
             return "text_not_verified"
+        if send_arrow:
+            send_x, send_y = send_arrow["point"]
+            ok, _ = self.run_on_device(
+                device,
+                ["shell", "input", "tap", str(send_x), str(send_y)],
+                timeout=15,
+            )
+            if not ok:
+                return "send_error"
+            self.log(f"[{device}] Flecha azul de envío pulsada en ({send_x}, {send_y}).")
+            if self.wait_or_cancel(1.5, self.search_stop_event):
+                return "cancelled"
+            return "sent" if self.published_comment_visible(
+                device, comment_text, checks=5, delay=1.0
+            ) else "not_confirmed"
         hierarchy = self.get_android_hierarchy(device)
         publish_point = self.find_accessible_control(
             hierarchy,
@@ -5216,9 +5239,10 @@ class ProfessionalPhoneController:
                     if should_open_post:
                         returned_to_feed = self.return_to_feed_after_post(dev)
                         scroll_ready[dev] = returned_to_feed
-                        # La pantalla cambió al regresar. Debe analizarse el texto
-                        # del feed recuperado en un ciclo nuevo antes de desplazar.
-                        text_validated_this_cycle[dev] = False
+                        # return_to_feed_after_post ya volvió a leer la pantalla
+                        # y confirmó que dejó la publicación abierta. Esa lectura
+                        # valida el feed recuperado y permite continuar este ciclo.
+                        text_validated_this_cycle[dev] = returned_to_feed
                         if not returned_to_feed:
                             ad_guard[dev] = 2
                     if not continuous:
@@ -5721,13 +5745,23 @@ class ProfessionalPhoneController:
         """Escribe texto y falla de forma explícita si Unicode no es compatible."""
         if not text:
             return True
-        character_delay = max(0.0, float(character_delay or 0.0))
+        delay_values = None
+        if isinstance(character_delay, (tuple, list)):
+            minimum, maximum, step = map(float, character_delay[:3])
+            minimum, maximum = sorted((max(0.0, minimum), max(0.0, maximum)))
+            step = max(0.001, step)
+            count = int(round((maximum - minimum) / step))
+            delay_values = tuple(minimum + index * step for index in range(count + 1))
+            character_delay = maximum
+        else:
+            character_delay = max(0.0, float(character_delay or 0.0))
         text = text.replace("\r\n", "\n").replace("\r", "\n")
 
         def wait_between(index):
             if character_delay <= 0.0 or index >= len(text) - 1:
                 return False
-            if self.wait_or_cancel(character_delay, stop_event):
+            selected_delay = random.choice(delay_values) if delay_values else character_delay
+            if self.wait_or_cancel(selected_delay, stop_event):
                 self.log(f"[{device}] Escritura cancelada durante la espera entre caracteres.")
                 return True
             return False
@@ -5836,6 +5870,22 @@ class ProfessionalPhoneController:
                 if not ok:
                     self.log(f"[{device}] No se pudo insertar un salto de línea: {detail}")
                     return False
+        return True
+
+    def clear_verified_focused_comment_text(self, device):
+        """Limpia el editor cuyo foco se confirmó sin volver a usar uiautomator."""
+        ok, detail = self.run_on_device(
+            device, ["shell", "input", "keycombination", "113", "29"], timeout=15
+        )
+        if not ok:
+            self.log(f"[{device}] No se pudo seleccionar el borrador del comentario: {detail}")
+            return False
+        ok, detail = self.run_on_device(
+            device, ["shell", "input", "keyevent", "67"], timeout=15
+        )
+        if not ok:
+            self.log(f"[{device}] No se pudo limpiar el borrador del comentario: {detail}")
+            return False
         return True
 
     def clear_focused_text(self, device, character_count):

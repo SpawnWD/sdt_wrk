@@ -21,6 +21,44 @@ Esta bitácora registra el estado base del proyecto y todos los cambios que se r
 
 ## Cambios completados
 
+### CHG-20261113-0730 — Foco estable del comentario y reanudación inmediata del scroll
+
+- Fecha y hora de inicio: 2026-11-13 07:30:17 (America/Mexico_City)
+- Estado: Completado localmente el 2026-11-13 07:35:25 (America/Mexico_City)
+- Tipo: Corrección del flujo de Búsqueda
+- Solicitud:
+  - Evitar que el teclado se abra y cierre repetidamente antes de escribir el comentario.
+  - Escribir cada carácter con una espera aleatoria de 80 a 220 milisegundos, en incrementos de 20 milisegundos.
+  - Después de regresar correctamente al feed, validar la pantalla recuperada y continuar el scroll sin dejarlo aplazado un ciclo completo.
+- Diagnóstico inicial:
+  - El flujo pulsa la fila `Comentar` y luego busca indistintamente una etiqueta accesible o el editor inferior; una etiqueta de acción todavía visible puede recibir un segundo toque aunque el teclado ya esté abierto.
+  - Al regresar al feed se establece deliberadamente `text_validated_this_cycle=False`, por lo que el bucle registra `Scroll aplazado` y espera la siguiente iteración para analizar el texto.
+- Alcance previsto: selección estricta del editor editable, confirmación de foco/teclado, intervalo aleatorio por carácter sólo para el comentario de Búsqueda y validación inmediata del feed recuperado.
+- Riesgos controlados: no duplicar comentarios, conservar Detener entre caracteres, no actuar en otra publicación y no saltar el análisis de palabras o publicidad del feed recuperado.
+- Referencia de rollback: commit `8e36fca` de la rama `integracion`.
+- Archivos previstos: `panel.py`, `LEEME.txt`, `Construir Ejecutable.ps1` y `BITACORA.md`.
+- Implementación:
+  - Después de pulsar la fila `Comentar`, el flujo consulta `dumpsys input_method` y exige teclado visible más foco en `MultiAutoCompleteTextView` o `EditText`.
+  - Cuando el editor ya tiene foco no vuelve a pulsar la acción ni ejecuta UiAutomation; limpia el borrador con selección total y retroceso.
+  - La escritura de Búsqueda elige para cada carácter uno de los valores `80, 100, 120, 140, 160, 180, 200, 220` milisegundos.
+  - La comprobación previa al envío usa primero OCR/captura y pulsa directamente la flecha azul si está disponible; accesibilidad y cálculo geométrico permanecen como respaldos.
+  - La confirmación producida por `return_to_feed_after_post` ahora marca el feed como validado y habilita el scroll en el mismo ciclo.
+- Pruebas realizadas:
+  - Diagnósticos simulados: aceptó únicamente teclado visible con foco en editor y rechazó teclado oculto o foco en `FrameLayout`.
+  - Texto `abcd`: aplicó exactamente `80`, `100` y `220` ms entre caracteres usando el rango discreto solicitado.
+  - Limpieza enfocada: emitió únicamente seleccionar todo y retroceso, sin consultar jerarquía.
+  - Recorrido simulado completo: abrió Comentario, conservó el foco, escribió `mis condolensias`, localizó y pulsó la flecha azul sin invocar UiAutomation con el teclado abierto.
+  - Se comprobó que el regreso exitoso asigna la validación del ciclo y permite el siguiente scroll.
+  - `python -m py_compile panel.py license_guard.py` y `git diff --check`: correctos.
+  - El teléfono `W555NEU0100057516` permaneció conectado; no se repitió el comentario ni se inició una nueva búsqueda para evitar duplicidad.
+  - Ejecutable 1.88.13 construido, iniciado y observado con el teléfono conectado y la tarea en estado `Listo`.
+- Archivos modificados: `panel.py`, `LEEME.txt`, `Construir Ejecutable.ps1` y `BITACORA.md`.
+- Entrega: `release_1.88.13/AdministracionDeMoviles.exe` (87,085,320 bytes) y `SHA256.txt`.
+- SHA-256: `51F5B7378D2C47818DD7931D1814A1A6C1CE69C47AAF448658DE31688BB9A8C1`.
+- Commit resultante: pendiente de crear.
+- Publicado o respaldado: pendiente de publicación en `integracion`.
+- Procedimiento de rollback: revertir el commit resultante o restaurar `8e36fca` en una rama de recuperación.
+
 ### CHG-20261113-0138 — Intervalo entre caracteres en Búsqueda
 
 - Fecha y hora de inicio: 2026-11-13 01:38:19 (America/Mexico_City)
