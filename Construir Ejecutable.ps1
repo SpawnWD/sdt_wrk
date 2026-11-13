@@ -1,8 +1,8 @@
 $ErrorActionPreference = "Stop"
 
 $projectRoot = (Resolve-Path -LiteralPath $PSScriptRoot).Path
-$buildPath = Join-Path $projectRoot "build_1.88.16"
-$releasePath = Join-Path $projectRoot "release_1.88.16"
+$buildPath = Join-Path $projectRoot "build_1.88.17"
+$releasePath = Join-Path $projectRoot "release_1.88.17"
 $panelPath = Join-Path $projectRoot "panel.py"
 $templatesPath = Join-Path $projectRoot "templates"
 $toolsPath = Join-Path $projectRoot "herramientas"
@@ -36,7 +36,7 @@ python -m PyInstaller `
     --clean `
     --onefile `
     --windowed `
-    --name "AdministracionDeMoviles" `
+    --name "TERAsoft" `
     --icon $iconPath `
     --distpath $releasePath `
     --workpath $buildPath `
@@ -49,13 +49,13 @@ python -m PyInstaller `
 
 if ($LASTEXITCODE -ne 0) { throw "PyInstaller terminó con código $LASTEXITCODE" }
 
-$executable = Join-Path $releasePath "AdministracionDeMoviles.exe"
+$executable = Join-Path $releasePath "TERAsoft.exe"
 if (-not (Test-Path -LiteralPath $executable -PathType Leaf)) {
     throw "No se generó el ejecutable esperado."
 }
 
 $hash = (Get-FileHash -LiteralPath $executable -Algorithm SHA256).Hash
-Set-Content -LiteralPath (Join-Path $releasePath "SHA256.txt") -Encoding UTF8 -Value "AdministracionDeMoviles.exe  SHA256  $hash"
+Set-Content -LiteralPath (Join-Path $releasePath "SHA256.txt") -Encoding UTF8 -Value "TERAsoft.exe  SHA256  $hash"
 
 Write-Host "Ejecutable generado: $executable"
 Write-Host "SHA256: $hash"

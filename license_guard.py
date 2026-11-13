@@ -227,7 +227,7 @@ class LicenseManager:
 def run_startup_gate():
     manager = LicenseManager()
     root = tk.Tk()
-    root.title("Administración de móviles (移动设备管理)")
+    root.title("TERAsoft (移动设备管理)")
     _set_window_icon(root)
     root.resizable(False, False)
     root.configure(bg="#eef3f8")
@@ -241,7 +241,7 @@ def run_startup_gate():
     header.pack_propagate(False)
     tk.Label(
         header,
-        text="Administración de móviles (移动设备管理)",
+        text="TERAsoft (移动设备管理)",
         bg="#145ea8",
         fg="white",
         font=("Microsoft YaHei UI", 18, "bold"),

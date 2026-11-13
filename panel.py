@@ -63,7 +63,7 @@ def set_windows_app_id():
         return
     try:
         ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID(
-            "AdministracionDeMoviles.Version1.88"
+            "TERAsoft.Version1.88"
         )
     except Exception:
         pass
@@ -97,7 +97,7 @@ class ProfessionalPhoneController:
 
     def __init__(self, root):
         self.root = root
-        self.root.title("Administración de móviles (移动设备管理)")
+        self.root.title("TERAsoft (移动设备管理)")
         self.root.geometry("1320x900")
         self.root.minsize(1100, 720)
         self.root.configure(bg="#eef2f7")
@@ -270,7 +270,7 @@ class ProfessionalPhoneController:
 
         title_box = tk.Frame(header, bg="#0f5fb8")
         title_box.pack(side="left", fill="y", padx=20)
-        tk.Label(title_box, text="Administración de móviles (移动设备管理)", bg="#0f5fb8", fg="white",
+        tk.Label(title_box, text="TERAsoft (移动设备管理)", bg="#0f5fb8", fg="white",
                  font=("Microsoft YaHei UI", 15, "bold")).pack(anchor="w", pady=(11, 0))
         self.current_page_var = tk.StringVar(value="Dispositivos")
         tk.Label(title_box, textvariable=self.current_page_var, bg="#0f5fb8", fg="#cfe5ff",

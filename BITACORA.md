@@ -1,4 +1,4 @@
-# Bitácora de cambios — Administración de móviles (移动设备管理)
+# Bitácora de cambios — TERAsoft (移动设备管理)
 
 Esta bitácora registra el estado base del proyecto y todos los cambios que se realicen a partir de este momento. Su objetivo es mantener trazabilidad, facilitar diagnósticos y permitir una reversión controlada cuando sea necesario.
 
@@ -20,6 +20,37 @@ Esta bitácora registra el estado base del proyecto y todos los cambios que se r
 - Ninguno.
 
 ## Cambios completados
+
+### CHG-20261113-1040 — Cambio de nombre visible a TERAsoft
+
+- Fecha y hora de inicio: 2026-11-13 10:40:12 (America/Mexico_City)
+- Estado: Completado y validado visualmente el 2026-11-13 10:43:52 (America/Mexico_City)
+- Tipo: Identidad visual / Empaquetado
+- Solicitud: Cambiar el nombre de la aplicación a `TERAsoft` y conservar el texto chino existente.
+- Alcance previsto:
+  - Usar `TERAsoft (移动设备管理)` en la ventana principal y la pantalla de activación.
+  - Renombrar el ejecutable de entrega a `TERAsoft.exe` y actualizar su archivo SHA-256.
+  - Actualizar el identificador de instancia única para la nueva identidad sin modificar funciones, licencia, icono ni versión visible china.
+- Riesgos controlados: conservar la licencia versión 2 y sus archivos existentes; detener la versión anterior antes de iniciar la nueva para evitar dos identidades ejecutándose a la vez.
+- Referencia de rollback: commit `8dc2da0` de la rama `integracion`.
+- Archivos previstos: `panel.py`, `license_guard.py`, `LEEME.txt`, `Construir Ejecutable.ps1` y `BITACORA.md`.
+- Implementación:
+  - La ventana principal, el encabezado y la pantalla de activación ahora usan `TERAsoft (移动设备管理)`.
+  - El identificador de instancia única cambió a `TERAsoft.Version1.88`.
+  - PyInstaller genera `TERAsoft.exe`; `SHA256.txt` registra ese mismo nombre.
+  - Se conserva el icono existente, la licencia versión 2, sus rutas persistentes y el pie `版本 1.88`.
+- Pruebas realizadas:
+  - Ausencia del nombre anterior en `panel.py`, `license_guard.py`, `LEEME.txt` y el constructor: correcta.
+  - `python -m py_compile panel.py license_guard.py` y `git diff --check`: correctos.
+  - Compilación PyInstaller y coincidencia del archivo SHA-256: correctas.
+  - Arranque real: proceso `TERAsoft.exe` respondiendo y ventana visible con título `TERAsoft (移动设备管理)`.
+  - Un aviso aislado de limpieza temporal de PyInstaller se cerró; el segundo arranque fue correcto sin eliminar carpetas manualmente.
+- Archivos modificados: `panel.py`, `license_guard.py`, `LEEME.txt`, `Construir Ejecutable.ps1` y `BITACORA.md`.
+- Entrega: `release_1.88.17/TERAsoft.exe` (87,088,481 bytes) y `SHA256.txt`.
+- SHA-256: `B7B270EE545AF2710B414620C72639D3A769FF87DAC6A0151E3C3C06541218FE`.
+- Commit resultante: pendiente de crear.
+- Publicado o respaldado: pendiente de publicación en `integracion`.
+- Procedimiento de rollback: revertir el commit resultante o restaurar `8dc2da0`; para ejecutar la versión anterior debe cerrarse primero `TERAsoft.exe`.
 
 ### CHG-20261113-0804 — Validación visual VIVO y retorno a “Publicación de”
 
