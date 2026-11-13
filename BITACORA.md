@@ -21,6 +21,44 @@ Esta bitácora registra el estado base del proyecto y todos los cambios que se r
 
 ## Cambios completados
 
+### CHG-20261112-1956 — Acciones validadas por la fila completa de la publicación
+
+- Fecha y hora de inicio: 2026-11-12 19:56:14 (America/Mexico_City)
+- Estado: Completado localmente el 2026-11-12 20:00:19 (America/Mexico_City)
+- Tipo: Corrección de interacción y navegación
+- Solicitud: En la publicación coincidente con `huauchinango`, desplazar hasta encontrar la fila completa Me gusta, Comentar y Compartir; usarla como confirmación antes de dar Me gusta y revisar que Comentario se abra y se ejecute correctamente.
+- Diagnóstico real:
+  - La publicación individual contiene una republicación anidada, una imagen larga, una bandeja fija de stickers y el editor inferior.
+  - El gesto anterior comenzaba en `82 %` de la altura y podía caer sobre la zona fija de stickers/editor.
+  - Accesibilidad no publica los textos de las acciones, pero sí expone tres contenedores clicables consecutivos: `[0,884][240,964]`, `[240,884][480,964]` y `[480,884][720,964]`.
+  - En la captura real, los detectores visuales localizaron Me gusta en `(105,926)` con puntuación `0.9630` y Comentar en `(355,926)` con puntuación `1.0`; ambos estaban alineados con Compartir.
+- Alcance: detector estructural de la fila de tres acciones, scroll desde una zona central segura, toque restringido al contenedor validado, confirmación visual de Me gusta, apertura validada del comentario, documentación, pruebas y ejecutable.
+- Riesgo controlado: no usar una manita aislada o un control de comentario dentro de otra publicación; se exigirá la fila completa, contigua y alineada.
+- Referencia de rollback: commit `ba90a25` de la rama `integracion`.
+- Implementación:
+  - Añade un detector estructural que exige tres contenedores clicables consecutivos, alineados, con un icono hijo en cada uno y cobertura completa del ancho de la publicación.
+  - Devuelve los centros seguros de izquierda, centro y derecha como Me gusta, Comentar y Compartir; en la publicación real fueron `(120,924)`, `(360,924)` y `(600,924)`.
+  - Combina la estructura con las figuras visuales: Me gusta real en `(105,926)` y Comentar en `(355,926)`.
+  - El scroll comienza en `71 %` de la altura y termina en `26 %`, por encima de la bandeja fija de stickers y del editor; revisa la pantalla después de cada gesto hasta 18 veces.
+  - Me gusta sólo pulsa la figura izquierda dentro de la fila confirmada y verifica después el estado azul o la señal accesible de `Quitar Me gusta`.
+  - Comentario sólo comienza después de confirmar la misma fila: pulsa el centro, localiza el editor inferior, lo limpia, escribe, verifica el texto, envía y conserva la validación posterior contra duplicados.
+  - La validación de un comentario publicado ahora prefiere la fila estructural completa; como respaldo acepta Me gusta y Comentar visualmente alineados.
+- Pruebas realizadas:
+  - Publicación real abierta mediante su fecha `48 min`; publicación individual y editor inferior confirmados.
+  - Dos desplazamientos manuales desde la zona segura bastaron para alcanzar la fila real sin tocar stickers ni editor.
+  - Detector real: límites `[0,884][240,964]`, `[240,884][480,964]` y `[480,884][720,964]`; centros correctos para las tres acciones.
+  - Me gusta simulado: efectuó un único toque en `(105,926)` y sólo devolvió `confirmed` después de recibir el estado visual activo.
+  - Comentario simulado: secuencia exacta `(355,926)` → editor `(360,1410)` → envío `(680,1400)`; escritura y confirmación final correctas.
+  - Un feed con seis pestañas fue rechazado como fila de acciones.
+  - Compilación de `panel.py` y `license_guard.py`, `git diff --check`, verificación de hash y constructor PyInstaller: correctos.
+  - No se dio Me gusta ni se publicó ningún comentario durante las pruebas; la publicación quedó abierta mostrando la fila para revisión del operador.
+- Archivos modificados: `panel.py`, `LEEME.txt`, `Construir Ejecutable.ps1` y `BITACORA.md`.
+- Entrega: `release_1.88.4/AdministracionDeMoviles.exe` (87,072,965 bytes) y `SHA256.txt`.
+- SHA-256: `60349190E479CD0934C55267A0BC8DA0F6CA0BBFEB2645C18B98DDD8EAEB0276`.
+- Commit resultante: el commit de la rama `integracion` que contiene esta entrada.
+- Publicado o respaldado: pendiente de publicación en `integracion`.
+- Procedimiento de rollback: revertir el commit resultante o restaurar `ba90a25` en una rama de recuperación.
+
 ### CHG-20261112-1931 — Recuperación posterior al enlace y scroll largo para Me gusta
 
 - Fecha y hora de inicio: 2026-11-12 19:31:34 (America/Mexico_City)

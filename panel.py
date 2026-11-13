@@ -3974,39 +3974,173 @@ class ProfessionalPhoneController:
             daemon=True,
         ).start()
 
+    def find_post_action_row(self, hierarchy, screen_size):
+        """Confirma los tres contenedores alineados: Me gusta, Comentar y Compartir."""
+        if hierarchy is None or not screen_size:
+            return None
+        width, height = screen_size
+        candidates = []
+        for node in hierarchy.iter("node"):
+            if node.attrib.get("visible-to-user", "true").casefold() == "false":
+                continue
+            if node.attrib.get("enabled", "true").casefold() == "false":
+                continue
+            if node.attrib.get("clickable", "false").casefold() != "true":
+                continue
+            bounds = self.parse_node_bounds(node)
+            if not bounds:
+                continue
+            left, top, right, bottom = bounds
+            box_width, box_height = right - left, bottom - top
+            center_y = (top + bottom) // 2
+            if not width * 0.26 <= box_width <= width * 0.40:
+                continue
+            if not height * 0.035 <= box_height <= height * 0.09:
+                continue
+            if not height * 0.15 <= center_y <= height * 0.88:
+                continue
+            icon_children = []
+            for child in node.iter("node"):
+                if child is node or child.attrib.get("class", "") != "android.view.View":
+                    continue
+                child_bounds = self.parse_node_bounds(child)
+                if not child_bounds:
+                    continue
+                c_left, c_top, c_right, c_bottom = child_bounds
+                if not (left <= c_left and c_right <= right and top <= c_top and c_bottom <= bottom):
+                    continue
+                child_width, child_height = c_right - c_left, c_bottom - c_top
+                if (
+                    width * 0.025 <= child_width <= width * 0.14
+                    and height * 0.018 <= child_height <= height * 0.065
+                ):
+                    icon_children.append(child_bounds)
+            if icon_children:
+                candidates.append({"bounds": bounds, "center_y": center_y, "icons": icon_children})
+
+        candidates.sort(key=lambda item: (item["center_y"], item["bounds"][0]))
+        for first in candidates:
+            same_row = [
+                item for item in candidates
+                if abs(item["center_y"] - first["center_y"]) <= height * 0.018
+            ]
+            same_row.sort(key=lambda item: item["bounds"][0])
+            for index in range(max(0, len(same_row) - 2)):
+                group = same_row[index:index + 3]
+                if len(group) < 3:
+                    continue
+                lefts = [item["bounds"][0] for item in group]
+                rights = [item["bounds"][2] for item in group]
+                tops = [item["bounds"][1] for item in group]
+                bottoms = [item["bounds"][3] for item in group]
+                if lefts[0] > width * 0.05 or rights[-1] < width * 0.95:
+                    continue
+                if max(tops) - min(tops) > height * 0.018 or max(bottoms) - min(bottoms) > height * 0.018:
+                    continue
+                if any(lefts[pos + 1] - rights[pos] > width * 0.035 for pos in range(2)):
+                    continue
+                points = [
+                    ((item["bounds"][0] + item["bounds"][2]) // 2, (item["bounds"][1] + item["bounds"][3]) // 2)
+                    for item in group
+                ]
+                return {
+                    "like": points[0],
+                    "comment": points[1],
+                    "share": points[2],
+                    "top": min(tops),
+                    "bottom": max(bottoms),
+                    "y": int(sum(point[1] for point in points) / 3),
+                    "bounds": [item["bounds"] for item in group],
+                }
+        return None
+
+    def scroll_to_post_action_row(self, device, screen_size, stop_event=None, max_scrolls=18):
+        """Desplaza desde una zona segura hasta confirmar la fila completa de acciones."""
+        width, height = screen_size
+        for attempt in range(max(0, max_scrolls) + 1):
+            hierarchy = self.get_android_hierarchy(device)
+            row = self.find_post_action_row(hierarchy, screen_size)
+            if row:
+                screen = self.capture_device_screen(device)
+                like_visual = self.locate_action_figure(
+                    screen, "like_outline.png", (0.00, 0.38)
+                )
+                comment_visual = self.locate_action_figure(
+                    screen, "comment_outline.png", (0.25, 0.68)
+                )
+                tolerance = int(height * 0.035)
+                if like_visual and abs(like_visual["point"][1] - row["y"]) <= tolerance:
+                    row["like_visual"] = like_visual
+                if comment_visual and abs(comment_visual["point"][1] - row["y"]) <= tolerance:
+                    row["comment_visual"] = comment_visual
+                self.log(
+                    f"[{device}] Fila completa Me gusta/Comentar/Compartir confirmada "
+                    f"en y={row['y']}."
+                )
+                return row
+            if attempt >= max_scrolls:
+                break
+            self.log(
+                f"[{device}] Fila de acciones aún no visible; desplazamiento seguro "
+                f"{attempt + 1}/{max_scrolls}."
+            )
+            ok, detail = self.run_on_device(
+                device,
+                [
+                    "shell", "input", "swipe", str(width // 2), str(int(height * 0.71)),
+                    str(width // 2), str(int(height * 0.26)), "520",
+                ],
+                timeout=15,
+            )
+            if not ok:
+                self.log(f"[{device}] No se pudo desplazar hacia la fila de acciones: {detail}")
+                break
+            if self.wait_or_cancel(0.85, stop_event):
+                return None
+        self.log(f"[{device}] No se confirmó la fila completa Me gusta/Comentar/Compartir.")
+        return None
+
+    def apply_confirmed_action_row_like(self, device, row, stop_event=None):
+        """Pulsa Me gusta sólo dentro de una fila completa previamente validada."""
+        visual = row.get("like_visual")
+        if visual and visual.get("active"):
+            self.log(f"[{device}] El Me gusta de la fila confirmada ya aparece activo.")
+            return "already_liked"
+        point = visual["point"] if visual else row["like"]
+        ok, detail = self.run_on_device(
+            device, ["shell", "input", "tap", str(point[0]), str(point[1])], timeout=15
+        )
+        if not ok:
+            self.log(f"[{device}] No se pudo pulsar Me gusta en la fila confirmada: {detail}")
+            return "error"
+        self.log(f"[{device}] Me gusta pulsado en {point} dentro de la fila completa confirmada.")
+        if self.wait_or_cancel(0.9, stop_event):
+            return "cancelled"
+        screen = self.capture_device_screen(device)
+        verification = self.locate_action_figure(screen, "like_outline.png", (0.00, 0.38))
+        if verification and verification.get("active"):
+            self.log(f"[{device}] Me gusta confirmado visualmente en color activo.")
+            return "confirmed"
+        hierarchy = self.get_android_hierarchy(device)
+        state, _ = self.find_like_control(hierarchy, anchor_y=row["y"])
+        if state == "already_liked":
+            self.log(f"[{device}] Me gusta confirmado por accesibilidad después del toque.")
+            return "confirmed"
+        self.log(f"[{device}] El toque se envió, pero Facebook no expuso confirmación visual.")
+        return "sent_unconfirmed"
+
     def perform_search_post_like(self, device):
         size = self.get_device_screen_size(device)
         if not size:
             return "screen_error"
-        width, height = size
-        max_scrolls = 18
-        for attempt in range(max_scrolls + 1):
-            hierarchy = self.get_android_hierarchy(device)
-            result = self.apply_like_action(device, hierarchy, stop_event=self.search_stop_event)
-            if result == "not_found":
-                result = self.apply_calculated_figure_action(device, "like", self.search_stop_event)
-            if result != "not_found":
-                return result
-            if attempt < max_scrolls:
-                self.log(
-                    f"[{device}] Me gusta aún no visible; desplazando la publicación larga "
-                    f"({attempt + 1}/{max_scrolls})."
-                )
-                ok, _ = self.run_on_device(
-                    device,
-                    [
-                        "shell", "input", "swipe", str(width//2), str(int(height*0.82)),
-                        str(width//2), str(int(height*0.24)), "650",
-                    ],
-                    timeout=15,
-                )
-                if not ok or self.wait_or_cancel(0.85, self.search_stop_event):
-                    break
-        self.log(
-            f"[{device}] No se localizó Me gusta después de revisar la publicación "
-            f"y realizar hasta {max_scrolls} desplazamientos."
+        row = self.scroll_to_post_action_row(
+            device, size, stop_event=self.search_stop_event, max_scrolls=18
         )
-        return "not_found"
+        if not row:
+            return "not_found"
+        return self.apply_confirmed_action_row_like(
+            device, row, stop_event=self.search_stop_event
+        )
 
     def bottom_comment_editor_top(self, hierarchy, screen_size):
         if hierarchy is None or not screen_size:
@@ -4148,6 +4282,7 @@ class ProfessionalPhoneController:
                 self.log(f"[{device}] Comentario confirmado por el aviso de Facebook antes del reintento.")
                 return "found"
 
+            action_row = self.find_post_action_row(hierarchy, size)
             screen = self.capture_device_screen(device)
             action_points = []
             if screen is not None:
@@ -4159,11 +4294,22 @@ class ProfessionalPhoneController:
                     if match:
                         action_points.append(match["point"])
             section_top = None
-            if action_points:
+            if action_row:
+                action_y = action_row["y"]
+                action_row_seen = True
+                section_top = action_row["bottom"] + max(8, int(height * 0.010))
+                self.log(
+                    f"[{device}] Fila completa de acciones localizada en y={action_y}; "
+                    "validando debajo de ella."
+                )
+            elif len(action_points) >= 2:
                 action_y = int(sum(point[1] for point in action_points) / len(action_points))
                 action_row_seen = True
                 section_top = action_y + max(12, int(height * 0.018))
-                self.log(f"[{device}] Fila de acciones localizada en y={action_y}; validando debajo de ella.")
+                self.log(
+                    f"[{device}] Figuras Me gusta y Comentar alineadas en y={action_y}; "
+                    "validando debajo de ellas."
+                )
             elif action_row_seen:
                 section_top = int(height * 0.12)
 
@@ -4211,8 +4357,28 @@ class ProfessionalPhoneController:
         if not size:
             return "screen_error"
         width, height = size
+        action_row = self.scroll_to_post_action_row(
+            device, size, stop_event=self.search_stop_event, max_scrolls=18
+        )
+        if not action_row:
+            return "action_row_not_found"
+        comment_visual = action_row.get("comment_visual")
+        action_point = comment_visual["point"] if comment_visual else action_row["comment"]
+        ok, detail = self.run_on_device(
+            device,
+            ["shell", "input", "tap", str(action_point[0]), str(action_point[1])],
+            timeout=15,
+        )
+        if not ok:
+            self.log(f"[{device}] No se pudo abrir Comentario desde la fila confirmada: {detail}")
+            return "comment_action_error"
+        self.log(
+            f"[{device}] Comentar pulsado en {action_point} dentro de la fila completa confirmada."
+        )
+        if self.wait_or_cancel(0.9, self.search_stop_event):
+            return "cancelled"
         comment_point = None
-        comment_opened = False
+        comment_opened = True
         for attempt in range(9):
             hierarchy = self.get_android_hierarchy(device)
             comment_point = self.find_accessible_control(
