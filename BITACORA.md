@@ -55,8 +55,8 @@ Esta bitácora registra el estado base del proyecto y todos los cambios que se r
 - Archivos modificados: `panel.py`, `LEEME.txt`, `Construir Ejecutable.ps1` y `BITACORA.md`.
 - Entrega: `release_1.88.13/AdministracionDeMoviles.exe` (87,085,320 bytes) y `SHA256.txt`.
 - SHA-256: `51F5B7378D2C47818DD7931D1814A1A6C1CE69C47AAF448658DE31688BB9A8C1`.
-- Commit resultante: pendiente de crear.
-- Publicado o respaldado: pendiente de publicación en `integracion`.
+- Commit funcional resultante: `586b8bc` (`fix: estabilizar comentario y reanudar scroll`).
+- Publicado o respaldado: Sí; cambio funcional publicado en la rama `integracion` de GitHub.
 - Procedimiento de rollback: revertir el commit resultante o restaurar `8e36fca` en una rama de recuperación.
 
 ### CHG-20261113-0138 — Intervalo entre caracteres en Búsqueda
