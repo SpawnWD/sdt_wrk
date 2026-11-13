@@ -21,6 +21,36 @@ Esta bitácora registra el estado base del proyecto y todos los cambios que se r
 
 ## Cambios completados
 
+### CHG-20261113-1334 — Controles visibles y captura independiente en Secuencias
+
+- Fecha y hora de inicio: 2026-11-13 13:34:30 (America/Mexico_City)
+- Estado: Completado y validado visualmente el 2026-11-13 13:39:38 (America/Mexico_City).
+- Tipo: Corrección de interfaz / Distribución adaptable.
+- Solicitud: Recuperar el botón de ejecución oculto en la pantalla `Secuencias` y abrir la pantalla del teléfono en una ventana independiente para no restar espacio al panel principal.
+- Diagnóstico inicial: los botones `Ejecutar paso seleccionado`, `Ejecutar secuencia completa` y `Detener` están colocados después del panel expandible de captura y pasos; al reducirse la altura disponible por el registro de actividad, quedan fuera del área visible.
+- Cambio previsto: colocar los controles de ejecución y su estado antes del panel expandible; trasladar la captura interactiva a una ventana separada con actualización propia y dejar el área central para la lista de pasos.
+- Riesgos controlados: conservar comandos, estados habilitado/deshabilitado, selección de pasos, coordenadas proporcionales, marcas de clic/deslizamiento y comportamiento de detención.
+- Referencia de rollback: commit `98a103e` de la rama `integracion`.
+- Archivos previstos: `panel.py`, `Construir Ejecutable.ps1`, `LEEME.txt` y `BITACORA.md`.
+- Implementación:
+  - Los botones `Ejecutar paso seleccionado`, `Ejecutar secuencia completa` y `Detener` se colocaron encima del área expandible y permanecen visibles con el registro inferior abierto.
+  - El estado de la secuencia comparte esa misma fila sin cambiar la lógica de habilitación o detención.
+  - La captura dejó de ocupar el panel principal; `Abrir/capturar teléfono seleccionado` crea una ventana independiente redimensionable.
+  - La ventana separada conserva el registro proporcional de clics y deslizamientos e incorpora `Actualizar captura`.
+  - Al cerrar la vista se liberan sólo la imagen y su geometría; los pasos registrados permanecen en el constructor.
+- Pruebas realizadas:
+  - `python -m py_compile panel.py license_guard.py` y `git diff --check`: correctos.
+  - Validación visual del código fuente: controles de ejecución visibles y lista de pasos usando todo el ancho disponible.
+  - Arranque real de `TERAsoft.exe`: correcto, con un teléfono conectado y seleccionado.
+  - Captura real del teléfono: abierta correctamente en `Pantalla del teléfono — Secuencias`, separada de la ventana principal.
+  - Compilación PyInstaller y coincidencia del archivo SHA-256: correctas.
+- Archivos modificados: `panel.py`, `Construir Ejecutable.ps1`, `LEEME.txt` y `BITACORA.md`.
+- Entrega: `release_1.88.18/TERAsoft.exe` (87,088,931 bytes) y `SHA256.txt`.
+- SHA-256: `EE5833F470FD2A4EC1A9A03E1E9DFB0E2D6E640C0CEB3261A32C53DA21F46556`.
+- Commit resultante: pendiente de crear.
+- Publicado o respaldado: pendiente de publicación en `integracion`.
+- Procedimiento de rollback: revertir el commit resultante o restaurar `98a103e`.
+
 ### CHG-20261113-1040 — Cambio de nombre visible a TERAsoft
 
 - Fecha y hora de inicio: 2026-11-13 10:40:12 (America/Mexico_City)
@@ -48,8 +78,8 @@ Esta bitácora registra el estado base del proyecto y todos los cambios que se r
 - Archivos modificados: `panel.py`, `license_guard.py`, `LEEME.txt`, `Construir Ejecutable.ps1` y `BITACORA.md`.
 - Entrega: `release_1.88.17/TERAsoft.exe` (87,088,481 bytes) y `SHA256.txt`.
 - SHA-256: `B7B270EE545AF2710B414620C72639D3A769FF87DAC6A0151E3C3C06541218FE`.
-- Commit resultante: pendiente de crear.
-- Publicado o respaldado: pendiente de publicación en `integracion`.
+- Commit funcional resultante: `98a103e` (`feat: renombrar aplicacion a TERAsoft`).
+- Publicado o respaldado: Sí; cambio funcional publicado en la rama `integracion` de GitHub.
 - Procedimiento de rollback: revertir el commit resultante o restaurar `8dc2da0`; para ejecutar la versión anterior debe cerrarse primero `TERAsoft.exe`.
 
 ### CHG-20261113-0804 — Validación visual VIVO y retorno a “Publicación de”

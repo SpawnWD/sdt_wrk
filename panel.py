@@ -150,6 +150,8 @@ class ProfessionalPhoneController:
         self.sequence_capture_size = None
         self.sequence_display_geometry = None
         self.sequence_photo = None
+        self.sequence_preview_window = None
+        self.sequence_canvas = None
         self.sequence_record_mode = "tap"
         self.sequence_swipe_start = None
         self.ocr_warning_shown = False
@@ -823,7 +825,11 @@ class ProfessionalPhoneController:
 
         toolbar = ttk.Frame(sequence_frame)
         toolbar.pack(fill="x", pady=(0, 7))
-        ttk.Button(toolbar, text="Capturar teléfono seleccionado", command=self.capture_sequence_screen).pack(side="left")
+        ttk.Button(
+            toolbar,
+            text="Abrir/capturar teléfono seleccionado",
+            command=self.capture_sequence_screen,
+        ).pack(side="left")
         ttk.Button(toolbar, text="Guardar", command=self.save_sequence_file).pack(side="right", padx=(7, 0))
         ttk.Button(toolbar, text="Cargar", command=self.load_sequence_file).pack(side="right")
 
@@ -857,49 +863,8 @@ class ProfessionalPhoneController:
         self.sequence_action_fields.pack(fill="x", pady=(6, 0))
         self.render_sequence_action_fields()
 
-        content = ttk.Panedwindow(sequence_frame, orient="horizontal")
-        content.pack(fill="both", expand=True)
-        preview_frame = ttk.LabelFrame(content, text=" Pantalla del teléfono ", padding=5)
-        steps_frame = ttk.LabelFrame(content, text=" Pasos registrados ", padding=5)
-        content.add(preview_frame, weight=3)
-        content.add(steps_frame, weight=2)
-
-        self.sequence_canvas = tk.Canvas(
-            preview_frame,
-            width=430,
-            height=350,
-            bg="#202020",
-            highlightthickness=1,
-            highlightbackground="#606060",
-            cursor="crosshair",
-        )
-        self.sequence_canvas.pack(fill="both", expand=True)
-        self.sequence_canvas.bind("<Button-1>", self.record_sequence_tap)
-
-        self.sequence_tree = ttk.Treeview(
-            steps_frame,
-            columns=("step", "type", "detail"),
-            show="headings",
-            height=11,
-            selectmode="browse",
-        )
-        self.sequence_tree.heading("step", text="#")
-        self.sequence_tree.heading("type", text="Acción")
-        self.sequence_tree.heading("detail", text="Detalle")
-        self.sequence_tree.column("step", width=40, anchor="center", stretch=False)
-        self.sequence_tree.column("type", width=85, anchor="w", stretch=False)
-        self.sequence_tree.column("detail", width=220, anchor="w")
-        self.sequence_tree.pack(fill="both", expand=True)
-
-        edit_row = ttk.Frame(steps_frame)
-        edit_row.pack(fill="x", pady=(6, 0))
-        ttk.Button(edit_row, text="Subir", command=lambda: self.move_sequence_step(-1)).pack(side="left")
-        ttk.Button(edit_row, text="Bajar", command=lambda: self.move_sequence_step(1)).pack(side="left", padx=(5, 0))
-        ttk.Button(edit_row, text="Eliminar", command=self.delete_sequence_step).pack(side="left", padx=(5, 0))
-        ttk.Button(edit_row, text="Limpiar", command=self.clear_sequence_steps).pack(side="right")
-
         execution_row = ttk.Frame(sequence_frame)
-        execution_row.pack(fill="x", pady=(8, 4))
+        execution_row.pack(fill="x", pady=(1, 7))
         self.btn_sequence_step = ttk.Button(
             execution_row,
             text="Ejecutar paso seleccionado",
@@ -924,11 +889,36 @@ class ProfessionalPhoneController:
         self.btn_sequence_stop.pack(side="left", padx=(7, 0))
         self.sequence_status_var = tk.StringVar(value="Secuencia lista. No hay pasos registrados.")
         ttk.Label(
-            sequence_frame,
+            execution_row,
             textvariable=self.sequence_status_var,
             foreground="#1d5f91",
             font=("Segoe UI", 9, "bold"),
-        ).pack(fill="x", pady=(2, 0))
+        ).pack(side="left", fill="x", expand=True, padx=(12, 0))
+
+        steps_frame = ttk.LabelFrame(sequence_frame, text=" Pasos registrados ", padding=5)
+        steps_frame.pack(fill="both", expand=True)
+
+        self.sequence_tree = ttk.Treeview(
+            steps_frame,
+            columns=("step", "type", "detail"),
+            show="headings",
+            height=11,
+            selectmode="browse",
+        )
+        self.sequence_tree.heading("step", text="#")
+        self.sequence_tree.heading("type", text="Acción")
+        self.sequence_tree.heading("detail", text="Detalle")
+        self.sequence_tree.column("step", width=40, anchor="center", stretch=False)
+        self.sequence_tree.column("type", width=85, anchor="w", stretch=False)
+        self.sequence_tree.column("detail", width=220, anchor="w")
+        self.sequence_tree.pack(fill="both", expand=True)
+
+        edit_row = ttk.Frame(steps_frame)
+        edit_row.pack(fill="x", pady=(6, 0))
+        ttk.Button(edit_row, text="Subir", command=lambda: self.move_sequence_step(-1)).pack(side="left")
+        ttk.Button(edit_row, text="Bajar", command=lambda: self.move_sequence_step(1)).pack(side="left", padx=(5, 0))
+        ttk.Button(edit_row, text="Eliminar", command=self.delete_sequence_step).pack(side="left", padx=(5, 0))
+        ttk.Button(edit_row, text="Limpiar", command=self.clear_sequence_steps).pack(side="right")
 
     def render_sequence_action_fields(self):
         if not hasattr(self, "sequence_action_fields"):
@@ -1284,6 +1274,7 @@ class ProfessionalPhoneController:
         if len(devices) != 1:
             return messagebox.showwarning("Selección", "Selecciona exactamente un teléfono para capturar su pantalla.")
         device = devices[0]
+        self.open_sequence_preview_window()
         self.sequence_status_var.set(f"Capturando pantalla de {self.display_device_name(device)}...")
 
         def worker():
@@ -1295,10 +1286,74 @@ class ProfessionalPhoneController:
 
         threading.Thread(target=worker, daemon=True).start()
 
+    def open_sequence_preview_window(self):
+        window = self.sequence_preview_window
+        try:
+            if window is not None and window.winfo_exists():
+                window.deiconify()
+                window.lift()
+                return window
+        except tk.TclError:
+            pass
+
+        window = tk.Toplevel(self.root)
+        window.title("Pantalla del teléfono — Secuencias")
+        window.geometry("500x720")
+        window.minsize(350, 480)
+
+        header = ttk.Frame(window, padding=(8, 7))
+        header.pack(fill="x")
+        ttk.Label(
+            header,
+            text="Vista independiente para registrar clics y deslizamientos",
+            font=("Segoe UI", 9, "bold"),
+        ).pack(side="left", fill="x", expand=True)
+        ttk.Button(
+            header,
+            text="Actualizar captura",
+            command=self.capture_sequence_screen,
+        ).pack(side="right")
+
+        self.sequence_canvas = tk.Canvas(
+            window,
+            width=430,
+            height=620,
+            bg="#202020",
+            highlightthickness=1,
+            highlightbackground="#606060",
+            cursor="crosshair",
+        )
+        self.sequence_canvas.pack(fill="both", expand=True, padx=8, pady=(0, 8))
+        self.sequence_canvas.bind("<Button-1>", self.record_sequence_tap)
+        window.protocol("WM_DELETE_WINDOW", self.close_sequence_preview_window)
+        self.sequence_preview_window = window
+        window.update_idletasks()
+        return window
+
+    def close_sequence_preview_window(self):
+        window = self.sequence_preview_window
+        self.sequence_preview_window = None
+        self.sequence_canvas = None
+        self.sequence_photo = None
+        self.sequence_display_geometry = None
+        self.sequence_capture_size = None
+        self.sequence_swipe_start = None
+        if window is not None:
+            try:
+                if window.winfo_exists():
+                    window.destroy()
+            except tk.TclError:
+                pass
+
     def show_sequence_screen(self, device, screen):
         if screen is None or not OPENCV_AVAILABLE:
             self.sequence_status_var.set("La vista previa requiere OpenCV.")
             return
+        self.open_sequence_preview_window()
+        if self.sequence_canvas is None:
+            self.sequence_status_var.set("No se pudo abrir la ventana de captura.")
+            return
+        self.sequence_preview_window.update_idletasks()
         source_height, source_width = screen.shape[:2]
         canvas_width = max(320, self.sequence_canvas.winfo_width())
         canvas_height = max(300, self.sequence_canvas.winfo_height())
@@ -1634,7 +1689,7 @@ class ProfessionalPhoneController:
             self.draw_sequence_markers()
 
     def draw_sequence_markers(self):
-        if not hasattr(self, "sequence_canvas"):
+        if self.sequence_canvas is None:
             return
         self.sequence_canvas.delete("sequence_marker")
         if not self.sequence_display_geometry:
@@ -2325,6 +2380,10 @@ class ProfessionalPhoneController:
             except: pass
         for window in list(self.device_log_windows.values()):
             try: window.destroy()
+            except: pass
+        preview_window = self.sequence_preview_window
+        if preview_window is not None:
+            try: preview_window.destroy()
             except: pass
         self.root.destroy()
 
