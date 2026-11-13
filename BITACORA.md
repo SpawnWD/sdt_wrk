@@ -47,8 +47,8 @@ Esta bitácora registra el estado base del proyecto y todos los cambios que se r
 - Archivos modificados: `panel.py`, `Construir Ejecutable.ps1`, `LEEME.txt` y `BITACORA.md`.
 - Entrega: `release_1.88.18/TERAsoft.exe` (87,088,931 bytes) y `SHA256.txt`.
 - SHA-256: `EE5833F470FD2A4EC1A9A03E1E9DFB0E2D6E640C0CEB3261A32C53DA21F46556`.
-- Commit resultante: pendiente de crear.
-- Publicado o respaldado: pendiente de publicación en `integracion`.
+- Commit funcional resultante: `32191ae` (`fix: mantener controles visibles en secuencias`).
+- Publicado o respaldado: Sí; cambio funcional publicado en la rama `integracion` de GitHub.
 - Procedimiento de rollback: revertir el commit resultante o restaurar `98a103e`.
 
 ### CHG-20261113-1040 — Cambio de nombre visible a TERAsoft
