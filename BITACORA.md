@@ -21,6 +21,35 @@ Esta bitácora registra el estado base del proyecto y todos los cambios que se r
 
 ## Cambios completados
 
+### CHG-20261113-0138 — Intervalo entre caracteres en Búsqueda
+
+- Fecha y hora de inicio: 2026-11-13 01:38:19 (America/Mexico_City)
+- Estado: Completado localmente el 2026-11-13 01:40:43 (America/Mexico_City)
+- Tipo: Ajuste de escritura de comentarios
+- Solicitud: Reducir la velocidad de escritura del comentario usando una espera de 300 milisegundos entre caracteres.
+- Alcance: únicamente Comentario dentro de Búsqueda; conservar inyección inmediata en las demás pestañas y compatibilidad ASCII/Unicode.
+- Riesgo controlado: mantener restauración del teclado original, saltos de línea y respuesta al botón Detener entre caracteres.
+- Referencia de rollback: commit `32ea527` de la rama `integracion`.
+- Implementación:
+  - Extiende `inject_text_adb` con `character_delay` y `stop_event`, conservando cero como valor predeterminado para no cambiar otros módulos.
+  - Búsqueda llama la escritura del comentario con `character_delay=0.300`.
+  - En ASCII envía un comando por carácter; espacios y metacaracteres conservan el escape de ADB.
+  - En Unicode activa ADB Keyboard una sola vez y transmite cada carácter individualmente en Base64; después restaura el teclado anterior.
+  - Los saltos de línea se mantienen mediante Enter y el botón Detener se comprueba durante cada intervalo.
+- Pruebas realizadas:
+  - Texto ASCII `a b`: comandos independientes `a`, `%s`, `b` y exactamente dos esperas de `300 ms`.
+  - Modo heredado sin intervalo: `abc` permaneció en una sola inyección y sin espera.
+  - Unicode `áB`: dos transmisiones Base64, una espera de `300 ms` y un único ciclo de cambio/restauración del teclado.
+  - Cancelación durante la primera espera: no escribió el segundo carácter.
+  - Compilación de `panel.py` y `license_guard.py`, `git diff --check`, hash y construcción PyInstaller: correctos.
+  - No se publicó ningún comentario durante las pruebas.
+- Archivos modificados: `panel.py`, `LEEME.txt`, `Construir Ejecutable.ps1` y `BITACORA.md`.
+- Entrega: `release_1.88.12/AdministracionDeMoviles.exe` (87,083,242 bytes) y `SHA256.txt`.
+- SHA-256: `576D921DCF828740B97AA98D677F9DE4A5767A7249CCEED26AD911627E4B8D07`.
+- Commit resultante: el commit de la rama `integracion` que contiene esta entrada.
+- Publicado o respaldado: pendiente de publicación en `integracion`.
+- Procedimiento de rollback: revertir el commit resultante o restaurar `32ea527` en una rama de recuperación.
+
 ### CHG-20261113-0130 — Botón de envío alineado con el campo de comentario
 
 - Fecha y hora de inicio: 2026-11-13 01:30:11 (America/Mexico_City)

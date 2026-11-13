@@ -4762,7 +4762,12 @@ class ProfessionalPhoneController:
             return "clear_error"
         if self.wait_or_cancel(0.3, self.search_stop_event):
             return "cancelled"
-        if not self.inject_text_adb(device, comment_text):
+        if not self.inject_text_adb(
+            device,
+            comment_text,
+            character_delay=0.300,
+            stop_event=self.search_stop_event,
+        ):
             return "write_error"
         if self.wait_or_cancel(0.9, self.search_stop_event):
             return "cancelled"
@@ -5712,10 +5717,38 @@ class ProfessionalPhoneController:
             text = text[:match.start()] + random.choice(options) + text[match.end():]
         return text
 
-    def inject_text_adb(self, device, text):
+    def inject_text_adb(self, device, text, character_delay=0.0, stop_event=None):
         """Escribe texto y falla de forma explícita si Unicode no es compatible."""
         if not text:
             return True
+        character_delay = max(0.0, float(character_delay or 0.0))
+        text = text.replace("\r\n", "\n").replace("\r", "\n")
+
+        def wait_between(index):
+            if character_delay <= 0.0 or index >= len(text) - 1:
+                return False
+            if self.wait_or_cancel(character_delay, stop_event):
+                self.log(f"[{device}] Escritura cancelada durante la espera entre caracteres.")
+                return True
+            return False
+
+        def broadcast_character(character):
+            if character == "\n":
+                return self.run_on_device(
+                    device, ["shell", "input", "keyevent", "66"], timeout=15
+                )
+            payload = base64.b64encode(character.encode("utf-8")).decode("ascii")
+            return self.run_on_device(
+                device,
+                ["shell", "am", "broadcast", "-a", "ADB_INPUT_B64", "--es", "msg", payload],
+                timeout=20,
+            )
+
+        def escaped_input_fragment(value):
+            escaped = value.replace("\\", "\\\\").replace("%", "\\%").replace(" ", "%s")
+            for character in ('"', "'", "&", "<", ">", ";", "|", "(", ")", "$", "`", "!", "*", "?", "[", "]", "{", "}"):
+                escaped = escaped.replace(character, "\\" + character)
+            return escaped
 
         needs_unicode = any(ord(character) > 127 for character in text)
         if needs_unicode:
@@ -5743,19 +5776,47 @@ class ProfessionalPhoneController:
                 if not ok:
                     self.log(f"[{device}] No se pudo activar ADB Keyboard: {detail}")
                     return False
-                payload = base64.b64encode(text.encode("utf-8")).decode("ascii")
-                ok, detail = self.run_on_device(
-                    device,
-                    ["shell", "am", "broadcast", "-a", "ADB_INPUT_B64", "--es", "msg", payload],
-                    timeout=20,
-                )
-                if not ok:
-                    self.log(f"[{device}] No se pudo inyectar texto Unicode: {detail}")
-                    return False
+                if character_delay > 0.0:
+                    for index, character in enumerate(text):
+                        ok, detail = broadcast_character(character)
+                        if not ok:
+                            self.log(f"[{device}] No se pudo inyectar un carácter Unicode: {detail}")
+                            return False
+                        if wait_between(index):
+                            return False
+                else:
+                    payload = base64.b64encode(text.encode("utf-8")).decode("ascii")
+                    ok, detail = self.run_on_device(
+                        device,
+                        ["shell", "am", "broadcast", "-a", "ADB_INPUT_B64", "--es", "msg", payload],
+                        timeout=20,
+                    )
+                    if not ok:
+                        self.log(f"[{device}] No se pudo inyectar texto Unicode: {detail}")
+                        return False
             finally:
                 previous = current_ime.strip()
                 if previous and previous != "null":
                     self.run_on_device(device, ["shell", "ime", "set", previous], timeout=15)
+            return True
+
+        if character_delay > 0.0:
+            for index, character in enumerate(text):
+                if character == "\n":
+                    ok, detail = self.run_on_device(
+                        device, ["shell", "input", "keyevent", "66"], timeout=15
+                    )
+                else:
+                    ok, detail = self.run_on_device(
+                        device,
+                        ["shell", "input", "text", escaped_input_fragment(character)],
+                        timeout=20,
+                    )
+                if not ok:
+                    self.log(f"[{device}] No se pudo escribir un carácter del comentario: {detail}")
+                    return False
+                if wait_between(index):
+                    return False
             return True
 
         lines = text.splitlines() or [""]
@@ -5763,9 +5824,7 @@ class ProfessionalPhoneController:
             # ADB interpreta %s como espacio. Los metacaracteres se escapan para
             # que el texto llegue directamente al campo enfocado, sin depender
             # de que Android incluya la utilidad externa base64.
-            escaped = line.replace("\\", "\\\\").replace("%", "\\%").replace(" ", "%s")
-            for character in ('"', "'", "&", "<", ">", ";", "|", "(", ")", "$", "`", "!", "*", "?", "[", "]", "{", "}"):
-                escaped = escaped.replace(character, "\\" + character)
+            escaped = escaped_input_fragment(line)
             ok, detail = self.run_on_device(
                 device, ["shell", "input", "text", escaped], timeout=20
             )
