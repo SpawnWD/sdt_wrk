@@ -24,7 +24,7 @@ Esta bitácora registra el estado base del proyecto y todos los cambios que se r
 ### CHG-20261113-0138 — Intervalo entre caracteres en Búsqueda
 
 - Fecha y hora de inicio: 2026-11-13 01:38:19 (America/Mexico_City)
-- Estado: Completado localmente el 2026-11-13 01:40:43 (America/Mexico_City)
+- Estado: Completado y publicado el 2026-11-13 01:40:43 (America/Mexico_City)
 - Tipo: Ajuste de escritura de comentarios
 - Solicitud: Reducir la velocidad de escritura del comentario usando una espera de 300 milisegundos entre caracteres.
 - Alcance: únicamente Comentario dentro de Búsqueda; conservar inyección inmediata en las demás pestañas y compatibilidad ASCII/Unicode.
@@ -46,8 +46,8 @@ Esta bitácora registra el estado base del proyecto y todos los cambios que se r
 - Archivos modificados: `panel.py`, `LEEME.txt`, `Construir Ejecutable.ps1` y `BITACORA.md`.
 - Entrega: `release_1.88.12/AdministracionDeMoviles.exe` (87,083,242 bytes) y `SHA256.txt`.
 - SHA-256: `576D921DCF828740B97AA98D677F9DE4A5767A7249CCEED26AD911627E4B8D07`.
-- Commit resultante: el commit de la rama `integracion` que contiene esta entrada.
-- Publicado o respaldado: pendiente de publicación en `integracion`.
+- Commit funcional resultante: `37ca33d` (`feat: escribir comentarios cada 300 milisegundos`).
+- Publicado o respaldado: Sí; cambio funcional publicado en la rama `integracion` de GitHub.
 - Procedimiento de rollback: revertir el commit resultante o restaurar `32ea527` en una rama de recuperación.
 
 ### CHG-20261113-0130 — Botón de envío alineado con el campo de comentario
