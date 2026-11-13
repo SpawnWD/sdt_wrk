@@ -21,6 +21,35 @@ Esta bitácora registra el estado base del proyecto y todos los cambios que se r
 
 ## Cambios completados
 
+### CHG-20261112-1835 — Regreso visual desde publicación abierta al feed
+
+- Fecha y hora de inicio: 2026-11-12 18:35:10 (America/Mexico_City)
+- Estado: Completado localmente el 2026-11-12 18:39:11 (America/Mexico_City)
+- Tipo: Corrección de navegación
+- Objetivo: Después de obtener el enlace, comentar o dar Me gusta, identificar el control de regreso `<` de la esquina superior izquierda, salir de la publicación abierta y continuar el scroll principal desde el punto anterior.
+- Alcance: detección accesible/geométrica del control Atrás, regreso seguro desde publicaciones simples o anidadas, documentación, constructor y pruebas sin ejecutar reacciones ni publicar comentarios.
+- Riesgo controlado: evitar un toque en la esquina superior izquierda cuando el teléfono ya se encuentre en el feed; el control sólo podrá usarse si antes se confirma una vista de publicación abierta.
+- Referencia de rollback: commit `2b1fae7` de la rama `integracion`.
+- Implementación:
+  - Busca rótulos accesibles `Atrás`, `Volver`, `Back`, los glifos `<`, `‹`, `〈`, `←` y la lectura OCR equivalente.
+  - Cuando Facebook Lite expone la flecha como un `ViewGroup` sin texto, valida que sea un botón pequeño y clicable pegado al borde superior izquierdo.
+  - Una vista sin texto se considera publicación únicamente si combina ese control superior con un editor `EditText` o `MultiAutoCompleteTextView` en la zona inferior.
+  - Tras pulsar `<`, vuelve a inspeccionar la pantalla; si continúa dentro de una publicación anidada repite hasta cuatro niveles. Sin control identificable usa Atrás de Android como respaldo.
+  - El scroll sólo se habilita después de que la pantalla deje de cumplir las condiciones de una publicación abierta.
+- Pruebas realizadas:
+  - En la pantalla real de `720×1600`, identificó el botón sin texto con límites `[0,60][96,153]` y centro `(48,106)`.
+  - Prueba real de regreso: antes del toque confirmó la publicación; después del toque desapareció el editor y la vista dejó de clasificarse como publicación.
+  - El feed mostró otro elemento izquierdo en `(60,204)`, pero fue descartado al no existir editor inferior, por lo que no se efectuó un segundo toque.
+  - Prueba simulada del flujo: ejecutó exactamente `tap 48 106`, confirmó el feed y habilitó la continuación.
+  - Compilación de `panel.py` y `license_guard.py`, `git diff --check` y constructor PyInstaller: correctos.
+  - No se dio Me gusta, no se escribió ni se publicó ningún comentario durante las pruebas.
+- Archivos modificados: `panel.py`, `LEEME.txt`, `Construir Ejecutable.ps1` y `BITACORA.md`.
+- Entrega: `release_1.88.2/AdministracionDeMoviles.exe` (87,067,301 bytes) y `SHA256.txt`.
+- SHA-256: `B21A9EAEA607F2B74DB50A1D14F275E70587A0ADB56DD8108A52F66344A90455`.
+- Commit resultante: el commit de la rama `integracion` que contiene esta entrada.
+- Publicado o respaldado: se publicará en la rama `integracion` junto con esta entrada.
+- Procedimiento de rollback: revertir el commit resultante o restaurar `2b1fae7` en una rama de recuperación.
+
 ### CHG-20261112-1528 — Validación desplazada del comentario antes del reintento
 
 - Fecha y hora de inicio: 2026-11-12 15:28:58 (America/Mexico_City)

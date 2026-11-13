@@ -3000,6 +3000,82 @@ class ProfessionalPhoneController:
         # no muestran comentarios, por lo que no exigimos varios botones Responder.
         return explicit_header or bottom_editor or comment_action_count >= 2
 
+    def find_open_post_back_control(self, hierarchy, screen_size, ocr_records=None):
+        """Localiza el `<` superior de una publicación sin confundirlo con el feed."""
+        if hierarchy is None or not screen_size:
+            return None
+        width, height = screen_size
+        candidates = []
+        back_labels = (
+            "atras", "volver", "regresar", "back", "navigate up", "ir atras",
+        )
+        back_glyphs = {"<", "‹", "〈", "←"}
+        for node in hierarchy.iter("node"):
+            if node.attrib.get("visible-to-user", "true").casefold() == "false":
+                continue
+            if node.attrib.get("enabled", "true").casefold() == "false":
+                continue
+            bounds = self.parse_node_bounds(node)
+            if not bounds:
+                continue
+            left, top, right, bottom = bounds
+            center = ((left + right) // 2, (top + bottom) // 2)
+            if not (center[0] <= width * 0.18 and height * 0.025 <= center[1] <= height * 0.14):
+                continue
+            if right - left > width * 0.24 or bottom - top > height * 0.13:
+                continue
+            labels = self.normalized_node_labels(node)
+            labeled_back = any(
+                label in back_glyphs or any(term == label or term in label for term in back_labels)
+                for label in labels
+            )
+            clickable = node.attrib.get("clickable", "false").casefold() == "true"
+            # FB Lite suele exponer la flecha como un ViewGroup sin texto:
+            # en ese caso se acepta únicamente el botón pequeño, clicable y pegado
+            # al borde superior izquierdo de una publicación ya confirmada.
+            geometric_back = (
+                clickable
+                and left <= width * 0.04
+                and right <= width * 0.22
+                and (right - left) >= width * 0.055
+                and (bottom - top) >= height * 0.025
+            )
+            if labeled_back or geometric_back:
+                priority = 0 if labeled_back else 2
+                candidates.append((priority, center[0], center[1], center, "accesibilidad" if labeled_back else "geometría"))
+
+        for record in ocr_records or []:
+            bounds = record.get("bounds")
+            label = self.normalize_search_text(record.get("text", "")).strip()
+            if not bounds or label not in back_glyphs:
+                continue
+            left, top, right, bottom = bounds
+            center = ((left + right) // 2, (top + bottom) // 2)
+            if center[0] <= width * 0.18 and height * 0.025 <= center[1] <= height * 0.14:
+                candidates.append((1, center[0], center[1], center, "OCR"))
+
+        if not candidates:
+            return None
+        candidates.sort(key=lambda item: (item[0], item[1], item[2]))
+        _, _, _, point, source = candidates[0]
+        return {"point": point, "source": source}
+
+    def is_open_post_hierarchy(self, hierarchy, screen_size):
+        """Confirma el diseño de publicación aun si FB Lite oculta sus textos."""
+        if hierarchy is None or not screen_size:
+            return False
+        _, height = screen_size
+        if not self.find_open_post_back_control(hierarchy, screen_size):
+            return False
+        for node in hierarchy.iter("node"):
+            class_name = node.attrib.get("class", "").casefold()
+            if "edittext" not in class_name and "autocompletetextview" not in class_name:
+                continue
+            bounds = self.parse_node_bounds(node)
+            if bounds and (bounds[1] + bounds[3]) / 2.0 >= height * 0.82:
+                return True
+        return False
+
     def has_ad_label_above(self, records, target_y, screen_height, max_distance_ratio=0.30):
         for record in records:
             if not self.is_ad_label_record(record):
@@ -4087,7 +4163,7 @@ class ProfessionalPhoneController:
         for attempt in range(max(1, attempts)):
             hierarchy = self.get_android_hierarchy(device)
             records = self.accessibility_text_records(hierarchy)
-            if self.is_open_post_view(records, screen_size):
+            if self.is_open_post_view(records, screen_size) or self.is_open_post_hierarchy(hierarchy, screen_size):
                 return True
             records.extend(self.windows_ocr_records(device))
             if self.is_open_post_view(records, screen_size):
@@ -4156,10 +4232,42 @@ class ProfessionalPhoneController:
     def return_to_feed_after_post(self, device):
         size = self.get_device_screen_size(device) or (1080, 1920)
         for depth in range(4):
-            if not self.confirm_open_post(device, size, attempts=1):
+            hierarchy = self.get_android_hierarchy(device)
+            records = self.accessibility_text_records(hierarchy)
+            ocr_records = self.windows_ocr_records(device)
+            records.extend(ocr_records)
+            if not (
+                self.is_open_post_view(records, size)
+                or self.is_open_post_hierarchy(hierarchy, size)
+            ):
                 self.log(f"[{device}] Regreso al feed confirmado; se continuará el scroll.")
                 return True
-            self.run_on_device(device, ["shell", "input", "keyevent", "4"])
+            back_control = self.find_open_post_back_control(hierarchy, size, ocr_records)
+            if back_control:
+                point = back_control["point"]
+                self.log(
+                    f"[{device}] Publicación abierta: control < identificado por "
+                    f"{back_control['source']} en {point}; regresando al feed."
+                )
+                ok, detail = self.run_on_device(
+                    device,
+                    ["shell", "input", "tap", str(point[0]), str(point[1])],
+                    timeout=15,
+                )
+                if not ok:
+                    self.log(f"[{device}] No se pudo pulsar el control <: {detail}")
+                    return False
+            else:
+                self.log(
+                    f"[{device}] La publicación sigue abierta, pero no se identificó el control <; "
+                    "se usa Atrás de Android como respaldo."
+                )
+                ok, detail = self.run_on_device(
+                    device, ["shell", "input", "keyevent", "4"], timeout=15
+                )
+                if not ok:
+                    self.log(f"[{device}] No se pudo ejecutar Atrás: {detail}")
+                    return False
             if self.wait_or_cancel(1.0, self.search_stop_event):
                 return False
             self.log(f"[{device}] Regreso {depth + 1}: comprobando si la publicación era anidada.")
