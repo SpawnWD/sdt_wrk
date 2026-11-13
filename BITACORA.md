@@ -21,6 +21,44 @@ Esta bitácora registra el estado base del proyecto y todos los cambios que se r
 
 ## Cambios completados
 
+### CHG-20261113-0747 — Recuperar publicación cuando el enlace abre un Live
+
+- Fecha y hora de inicio: 2026-11-13 07:47:58 (America/Mexico_City)
+- Estado: Completado localmente el 2026-11-13 07:51:22 (America/Mexico_City)
+- Tipo: Corrección del flujo de Búsqueda
+- Solicitud: En una publicación compartida cuyo perfil está transmitiendo en vivo, evitar que la reapertura del enlace desvíe el proceso al Live y continuar Me gusta/Comentario sobre la publicación correcta.
+- Diagnóstico real:
+  - En el feed actual hay una publicación exterior de `10 h` y una publicación anidada de `12 h` cuyo avatar muestra `LIVE`.
+  - La instantánea de Búsqueda eligió `(221, 1140)` para la fecha de `12 h`; una prueba reversible sobre ese punto abrió correctamente `Publicación de ULTRA Noticias`, por lo que el primer toque no es la causa.
+  - Después de copiar el enlace, `capture_open_post_link` llama siempre a `open_captured_post_for_actions`; si Facebook resuelve `/share/...` al Live, la recuperación vuelve a intentar esa misma URL y no conserva una ruta directa al timestamp original.
+  - El marcador geométrico `[fecha/hora visual]` también se estaba aceptando incorrectamente como encabezado estable.
+- Cambio previsto:
+  - Rechazar una pantalla Live como publicación accionable.
+  - Conservar la coordenada de fecha/hora en la referencia del post y excluir el marcador geométrico como encabezado.
+  - Si la URL abre otra pantalla, regresar al feed, pulsar una sola vez el timestamp original y confirmar identidad antes de ejecutar acciones.
+  - No volver a abrir por segunda vez una URL que ya falló.
+- Riesgos controlados: no actuar dentro del Live, no tocar publicaciones distintas, no duplicar comentarios y mantener el enlace capturado en el registro diario.
+- Referencia de rollback: commit `2a7b6d1` de la rama `integracion`.
+- Archivos previstos: `panel.py`, `LEEME.txt`, `Construir Ejecutable.ps1` y `BITACORA.md`.
+- Implementación:
+  - Se agregó detección de vista Live con señales textuales, editor inferior y ausencia de encabezado explícito de publicación; una simple insignia `LIVE` dentro de `Publicación de…` no se confunde.
+  - `confirm_open_post` y `confirm_actionable_open_post` rechazan la transmisión antes de permitir acciones.
+  - La referencia conserva `timestamp_point`; `[fecha/hora visual]` dejó de aceptarse como encabezado y OCR prefiere el nombre completo dentro de la misma franja vertical.
+  - Si la URL abre el Live, la recuperación pulsa Atrás, confirma el feed y usa una sola vez el timestamp original; la URL fallida no se abre nuevamente.
+- Pruebas realizadas:
+  - Captura y jerarquía reales de la variante compartida en el teléfono `W555NEU0100057516`.
+  - La instantánea real conservó `(221, 1140)` y el encabezado `ultra noticias huauchinango` para `sep confirma`.
+  - Toque reversible real sobre `(190, 1140)`: abrió `Publicación de ULTRA Noticias`; después se regresó al feed sin reaccionar ni comentar.
+  - Clasificación simulada: la publicación normal con insignia LIVE no se rechazó; la vista Live con editor y sin encabezado sí se rechazó.
+  - Recuperación simulada: `Live → Atrás → feed → timestamp original`, sin segundo comando de apertura URL.
+  - `python -m py_compile panel.py license_guard.py` y `git diff --check`: correctos.
+- Archivos modificados: `panel.py`, `LEEME.txt`, `Construir Ejecutable.ps1` y `BITACORA.md`.
+- Entrega provisional: `release_1.88.14/AdministracionDeMoviles.exe` (87,086,836 bytes) y `SHA256.txt`.
+- SHA-256: `4ED9CAC5A04C1A8D82708B24354E72016FF983F4D95CBDFD40431F401360A1D9`.
+- Commit resultante: pendiente de crear.
+- Publicado o respaldado: pendiente de publicación en `integracion`.
+- Procedimiento de rollback: revertir el commit resultante o restaurar `2a7b6d1` en una rama de recuperación.
+
 ### CHG-20261113-0730 — Foco estable del comentario y reanudación inmediata del scroll
 
 - Fecha y hora de inicio: 2026-11-13 07:30:17 (America/Mexico_City)

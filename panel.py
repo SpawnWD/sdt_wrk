@@ -3025,6 +3025,38 @@ class ProfessionalPhoneController:
         # no muestran comentarios, por lo que no exigimos varios botones Responder.
         return explicit_header or bottom_editor or comment_action_count >= 2
 
+    def is_live_video_view(self, records, screen_size):
+        """Distingue una transmisión abierta de una publicación normal con insignia LIVE."""
+        if not records or not screen_size:
+            return False
+        _, height = screen_size
+        normalized = []
+        explicit_post_header = False
+        bottom_editor = False
+        for record in records:
+            bounds = record.get("bounds")
+            text_value = self.normalize_search_text(record.get("text", "")).strip()
+            if not bounds or not text_value:
+                continue
+            normalized.append(text_value)
+            center_y = (bounds[1] + bounds[3]) / 2.0
+            if center_y <= height * 0.18 and re.search(r"\b(?:publicacion|post)\s+de\b", text_value):
+                explicit_post_header = True
+            if center_y >= height * 0.78 and any(label in text_value for label in (
+                "escribe un comentario", "comenta como", "write a comment", "comment as",
+            )):
+                bottom_editor = True
+        visible = " ".join(normalized)
+        strong_live_signal = any(label in visible for label in (
+            "transmision en vivo", "video en vivo", "esta en vivo", "ahora en vivo",
+            "live video", "watch live", "currently live", "espectadores en vivo",
+        ))
+        live_badge = any(value in {"live", "en vivo", "vivo"} for value in normalized)
+        # Una publicación ordinaria puede mostrar LIVE sobre el avatar del autor.
+        # Sólo se trata como transmisión si hay una señal fuerte o si el editor
+        # pertenece a una vista sin encabezado explícito "Publicación de".
+        return strong_live_signal or (live_badge and bottom_editor and not explicit_post_header)
+
     def find_open_post_back_control(self, hierarchy, screen_size, ocr_records=None):
         """Localiza el `<` superior de una publicación sin confundirlo con el feed."""
         if hierarchy is None or not screen_size:
@@ -3376,6 +3408,8 @@ class ProfessionalPhoneController:
         normalized = re.sub(r"\s+", " ", self.normalize_search_text(text_value or "")).strip()
         if not normalized:
             return ""
+        if "fecha/hora visual" in normalized or "fecha hora visual" in normalized:
+            return ""
         parts = [part.strip(" .·•|-") for part in re.split(r"[·•|]", normalized)]
         time_pattern = re.compile(
             r"(?:^|\s)\d{1,3}\s*(?:min(?:uto)?s?|m|h|hora?s?|d|dia?s?|sem(?:ana)?s?|a|ano?s?)(?:\s|$)"
@@ -3411,11 +3445,16 @@ class ProfessionalPhoneController:
                 continue
             if self.is_ad_label_record(record):
                 continue
-            candidates.append((abs(t_top - bottom), -len(anchor), anchor))
+            distance = abs(t_top - bottom)
+            # OCR suele separar el logotipo en palabras muy cercanas al timestamp
+            # (por ejemplo, sólo "noticias"). Dentro de una misma franja vertical
+            # se prefiere el nombre completo y más estable del encabezado.
+            distance_bucket = int(distance / max(1.0, height * 0.015))
+            candidates.append((distance_bucket, -len(anchor), distance, anchor))
         if not candidates:
             return ""
         candidates.sort()
-        return candidates[0][2]
+        return candidates[0][3]
 
     def post_reference_from_snapshot(self, snapshot):
         """Conserva la identidad mínima necesaria para volver al mismo post."""
@@ -3427,6 +3466,7 @@ class ProfessionalPhoneController:
                 if self.normalize_search_text(value).strip()
             ],
             "timestamp_text": self.normalize_search_text(snapshot.get("timestamp_text", "")).strip(),
+            "timestamp_point": tuple(snapshot.get("timestamp_point") or ()),
         }
 
     def post_reference_matches(self, records, post_reference):
@@ -4043,8 +4083,60 @@ class ProfessionalPhoneController:
             records = self.accessibility_text_records(hierarchy)
             ocr_records = self.windows_ocr_records(device)
             records.extend(ocr_records)
+            if self.is_live_video_view(records, screen_size):
+                self.log(
+                    f"[{device}] La reapertura del enlace entró al Live; "
+                    "se retrocede sin ejecutar Me gusta ni Comentario."
+                )
+                ok, detail = self.run_on_device(
+                    device, ["shell", "input", "keyevent", "4"], timeout=15
+                )
+                if not ok:
+                    self.log(f"[{device}] No se pudo salir del Live: {detail}")
+                    return False
+                if self.wait_or_cancel(0.60, self.search_stop_event):
+                    return False
+                continue
             if self.is_facebook_feed_hierarchy(hierarchy, screen_size):
-                self.log(f"[{device}] El retorno llegó al feed antes que a la publicación.")
+                timestamp_point = tuple((post_reference or {}).get("timestamp_point") or ())
+                if len(timestamp_point) == 2:
+                    point = (int(timestamp_point[0]), int(timestamp_point[1]))
+                    self.log(
+                        f"[{device}] El retorno llegó al feed; se abrirá una vez la fecha/hora "
+                        f"original en {point}, sin reutilizar la URL que abrió el Live."
+                    )
+                    ok, detail = self.run_on_device(
+                        device,
+                        ["shell", "input", "tap", str(point[0]), str(point[1])],
+                        timeout=15,
+                    )
+                    if not ok:
+                        self.log(f"[{device}] No se pudo pulsar la fecha/hora original: {detail}")
+                        return False
+                    if self.wait_or_cancel(1.1, self.search_stop_event):
+                        return False
+                    if self.confirm_actionable_open_post(
+                        device,
+                        screen_size,
+                        attempts=3,
+                        delay=0.55,
+                        post_reference=post_reference,
+                    ):
+                        self.search_link_recovery[device] = {
+                            "ready": True,
+                            "via_url": False,
+                            "post_url": post_url or "",
+                        }
+                        self.log(
+                            f"[{device}] Publicación original recuperada desde su fecha/hora; "
+                            "se continuará el proceso normal."
+                        )
+                        return True
+                    self.log(
+                        f"[{device}] La fecha/hora original no recuperó una publicación confirmada."
+                    )
+                else:
+                    self.log(f"[{device}] El retorno llegó al feed sin una fecha/hora recuperable.")
                 break
             screen = self.capture_device_screen(device)
             back_control = self.find_intermediate_back_control(
@@ -4094,35 +4186,10 @@ class ProfessionalPhoneController:
             if self.wait_or_cancel(0.60, self.search_stop_event):
                 return False
 
-        if post_url and self.is_facebook_url(post_url):
-            self.log(f"[{device}] Se reabrirá el enlace capturado para recuperar la publicación exacta.")
-            ok, detail = self.run_on_device(
-                device,
-                ["shell", "am", "start", "-a", "android.intent.action.VIEW", "-d", post_url, "com.facebook.lite"],
-                timeout=20,
-            )
-            if not ok:
-                self.log(f"[{device}] No se pudo reabrir la publicación: {detail}")
-                return False
-            if self.wait_or_cancel(1.4, self.search_stop_event):
-                return False
-            # La URL acaba de ser abierta explícitamente y por ello actúa como
-            # identidad fuerte del post. En esta ruta sólo exigimos que Facebook
-            # muestre una publicación limpia, no que OCR repita el encabezado.
-            if self.confirm_actionable_open_post(
-                device, screen_size, attempts=4, delay=0.65, post_reference=None
-            ):
-                self.log(
-                    f"[{device}] El feed no conservó la publicación original; el enlace capturado "
-                    "abrió una publicación limpia y será el destino de las acciones configuradas."
-                )
-                self.search_link_recovery[device] = {
-                    "ready": True,
-                    "via_url": True,
-                    "post_url": post_url,
-                }
-                return True
-        self.log(f"[{device}] No se logró recuperar una vista confirmada de la publicación.")
+        self.log(
+            f"[{device}] No se logró recuperar una vista confirmada de la publicación; "
+            "la URL ya fallida no se abrirá por segunda vez."
+        )
         return False
 
     def capture_open_post_link(self, device, screen_size, post_reference=None):
@@ -4883,10 +4950,14 @@ class ProfessionalPhoneController:
         for attempt in range(max(1, attempts)):
             hierarchy = self.get_android_hierarchy(device)
             records = self.accessibility_text_records(hierarchy)
-            if self.is_open_post_view(records, screen_size) or self.is_open_post_hierarchy(hierarchy, screen_size):
-                return True
             records.extend(self.windows_ocr_records(device))
-            if self.is_open_post_view(records, screen_size):
+            if self.is_live_video_view(records, screen_size):
+                self.log(
+                    f"[{device}] Se abrió una transmisión Live, no una publicación normal; "
+                    "la vista se rechaza para acciones."
+                )
+                return False
+            if self.is_open_post_view(records, screen_size) or self.is_open_post_hierarchy(hierarchy, screen_size):
                 return True
             if attempt + 1 < attempts and self.wait_or_cancel(delay, self.search_stop_event):
                 return False
@@ -4901,6 +4972,12 @@ class ProfessionalPhoneController:
             records = self.accessibility_text_records(hierarchy)
             ocr_records = self.windows_ocr_records(device)
             records.extend(ocr_records)
+            if self.is_live_video_view(records, screen_size):
+                self.log(
+                    f"[{device}] La URL resolvió a una transmisión Live; "
+                    "no se considera una publicación accionable."
+                )
+                return False
             if self.is_facebook_feed_hierarchy(hierarchy, screen_size):
                 return False
             screen = self.capture_device_screen(device)
