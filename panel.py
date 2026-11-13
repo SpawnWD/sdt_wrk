@@ -3025,13 +3025,97 @@ class ProfessionalPhoneController:
         # no muestran comentarios, por lo que no exigimos varios botones Responder.
         return explicit_header or bottom_editor or comment_action_count >= 2
 
-    def is_live_video_view(self, records, screen_size):
-        """Distingue una transmisión abierta de una publicación normal con insignia LIVE."""
+    def has_open_post_header(self, records, screen_size):
+        """Exige `Publicación de` en la franja superior de una vista abierta."""
         if not records or not screen_size:
             return False
         _, height = screen_size
+        for record in records:
+            bounds = record.get("bounds")
+            text_value = self.normalize_search_text(record.get("text", "")).strip()
+            if not bounds or not text_value:
+                continue
+            center_y = (bounds[1] + bounds[3]) / 2.0
+            if center_y <= height * 0.20 and re.search(
+                r"\b(?:publicacion|post)\s+de\b", text_value
+            ):
+                return True
+        return False
+
+    def has_top_back_publication_header(self, records, screen_size):
+        """Confirma la secuencia superior `< Publicación de …`."""
+        if not records or not screen_size:
+            return False
+        width, height = screen_size
+        back_glyphs = {"<", "‹", "〈", "←"}
+        header_records = []
+        back_records = []
+        for record in records:
+            bounds = record.get("bounds")
+            raw_text = record.get("text", "").strip()
+            normalized = self.normalize_search_text(raw_text).strip()
+            if not bounds or not normalized:
+                continue
+            center_y = (bounds[1] + bounds[3]) / 2.0
+            if center_y > height * 0.20:
+                continue
+            if re.search(r"\b(?:publicacion|post)\s+de\b", normalized):
+                header_records.append((bounds, normalized))
+            if normalized in back_glyphs:
+                back_records.append(bounds)
+        for bounds, normalized in header_records:
+            if re.match(r"^[<‹〈←]\s*(?:publicacion|post)\s+de\b", normalized):
+                return True
+            left, top, _, bottom = bounds
+            for back in back_records:
+                back_center_x = (back[0] + back[2]) / 2.0
+                back_center_y = (back[1] + back[3]) / 2.0
+                if back_center_x < left and back_center_x <= width * 0.20 and top <= back_center_y <= bottom:
+                    return True
+        return False
+
+    def locate_top_live_badge(self, screen):
+        """Localiza VIVO visual: rectángulo rojo grande con trazos blancos arriba."""
+        if not OPENCV_AVAILABLE or screen is None:
+            return None
+        height, width = screen.shape[:2]
+        hsv = cv2.cvtColor(screen, cv2.COLOR_BGR2HSV)
+        red_low = cv2.inRange(hsv, np.array([0, 115, 105]), np.array([12, 255, 255]))
+        red_high = cv2.inRange(hsv, np.array([168, 115, 105]), np.array([179, 255, 255]))
+        red = cv2.bitwise_or(red_low, red_high)
+        contours, _ = cv2.findContours(red, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+        candidates = []
+        for contour in contours:
+            x, y, box_width, box_height = cv2.boundingRect(contour)
+            center = (x + box_width // 2, y + box_height // 2)
+            if center[0] > width * 0.34 or center[1] > height * 0.14:
+                continue
+            if not width * 0.09 <= box_width <= width * 0.32:
+                continue
+            if not height * 0.025 <= box_height <= height * 0.10:
+                continue
+            crop_red = red[y:y + box_height, x:x + box_width]
+            crop_hsv = hsv[y:y + box_height, x:x + box_width]
+            if crop_red.size == 0 or crop_hsv.size == 0:
+                continue
+            red_fill = float(np.count_nonzero(crop_red)) / float(crop_red.size)
+            white = cv2.inRange(crop_hsv, np.array([0, 0, 185]), np.array([179, 85, 255]))
+            white_ratio = float(np.count_nonzero(white)) / float(white.size)
+            if red_fill < 0.52 or white_ratio < 0.035:
+                continue
+            candidates.append((red_fill + white_ratio, center, (x, y, box_width, box_height)))
+        if not candidates:
+            return None
+        candidates.sort(key=lambda item: item[0], reverse=True)
+        score, point, bounds = candidates[0]
+        return {"point": point, "bounds": bounds, "score": score}
+
+    def is_live_video_view(self, records, screen_size, screen=None):
+        """Distingue una transmisión abierta de una publicación normal con insignia LIVE."""
+        if not records or not screen_size:
+            return bool(self.locate_top_live_badge(screen))
+        _, height = screen_size
         normalized = []
-        explicit_post_header = False
         bottom_editor = False
         for record in records:
             bounds = record.get("bounds")
@@ -3040,8 +3124,6 @@ class ProfessionalPhoneController:
                 continue
             normalized.append(text_value)
             center_y = (bounds[1] + bounds[3]) / 2.0
-            if center_y <= height * 0.18 and re.search(r"\b(?:publicacion|post)\s+de\b", text_value):
-                explicit_post_header = True
             if center_y >= height * 0.78 and any(label in text_value for label in (
                 "escribe un comentario", "comenta como", "write a comment", "comment as",
             )):
@@ -3052,10 +3134,16 @@ class ProfessionalPhoneController:
             "live video", "watch live", "currently live", "espectadores en vivo",
         ))
         live_badge = any(value in {"live", "en vivo", "vivo"} for value in normalized)
+        explicit_post_header = self.has_open_post_header(records, screen_size)
+        visual_top_live = self.locate_top_live_badge(screen) is not None
         # Una publicación ordinaria puede mostrar LIVE sobre el avatar del autor.
         # Sólo se trata como transmisión si hay una señal fuerte o si el editor
         # pertenece a una vista sin encabezado explícito "Publicación de".
-        return strong_live_signal or (live_badge and bottom_editor and not explicit_post_header)
+        return (
+            strong_live_signal
+            or (live_badge and bottom_editor and not explicit_post_header)
+            or (visual_top_live and not explicit_post_header)
+        )
 
     def find_open_post_back_control(self, hierarchy, screen_size, ocr_records=None):
         """Localiza el `<` superior de una publicación sin confundirlo con el feed."""
@@ -4076,6 +4164,7 @@ class ProfessionalPhoneController:
         expected_header = (post_reference or {}).get("header_anchor", "")
         if expected_header:
             self.log(f"[{device}] Regreso dirigido al encabezado original: '{expected_header}'.")
+        live_redirect_seen = False
         for step in range(10):
             if self.search_stop_event.is_set():
                 return False
@@ -4083,10 +4172,12 @@ class ProfessionalPhoneController:
             records = self.accessibility_text_records(hierarchy)
             ocr_records = self.windows_ocr_records(device)
             records.extend(ocr_records)
-            if self.is_live_video_view(records, screen_size):
+            screen = self.capture_device_screen(device)
+            if self.is_live_video_view(records, screen_size, screen=screen):
+                live_redirect_seen = True
                 self.log(
-                    f"[{device}] La reapertura del enlace entró al Live; "
-                    "se retrocede sin ejecutar Me gusta ni Comentario."
+                    f"[{device}] VIVO rojo detectado en la franja superior; "
+                    "se ejecuta Atrás una vez sin Me gusta ni Comentario."
                 )
                 ok, detail = self.run_on_device(
                     device, ["shell", "input", "keyevent", "4"], timeout=15
@@ -4121,6 +4212,7 @@ class ProfessionalPhoneController:
                         attempts=3,
                         delay=0.55,
                         post_reference=post_reference,
+                        require_post_header=live_redirect_seen,
                     ):
                         self.search_link_recovery[device] = {
                             "ready": True,
@@ -4138,9 +4230,11 @@ class ProfessionalPhoneController:
                 else:
                     self.log(f"[{device}] El retorno llegó al feed sin una fecha/hora recuperable.")
                 break
-            screen = self.capture_device_screen(device)
-            back_control = self.find_intermediate_back_control(
-                hierarchy, screen_size, ocr_records, screen=screen
+            top_publication_header = self.has_top_back_publication_header(records, screen_size)
+            back_control = None if self.has_open_post_header(records, screen_size) else (
+                self.find_intermediate_back_control(
+                    hierarchy, screen_size, ocr_records, screen=screen
+                )
             )
             if back_control:
                 point = back_control["point"]
@@ -4157,9 +4251,15 @@ class ProfessionalPhoneController:
                 self.is_open_post_view(records, screen_size)
                 or self.is_open_post_hierarchy(hierarchy, screen_size)
             ) and self.post_reference_matches(records, post_reference):
+                if live_redirect_seen and not top_publication_header:
+                    self.log(
+                        f"[{device}] Se salió del Live, pero todavía no aparece "
+                        "'< Publicación de' en la parte superior; no se habilitan acciones."
+                    )
+                    return False
                 self.log(
-                    f"[{device}] Publicación original recuperada por encabezado y sin controles < inferiores; "
-                    "ya se puede buscar la fila de acciones."
+                    f"[{device}] Publicación original recuperada con encabezado "
+                    "'Publicación de'; ya se puede buscar la fila de acciones."
                 )
                 self.search_link_recovery[device] = {
                     "ready": True,
@@ -4951,7 +5051,8 @@ class ProfessionalPhoneController:
             hierarchy = self.get_android_hierarchy(device)
             records = self.accessibility_text_records(hierarchy)
             records.extend(self.windows_ocr_records(device))
-            if self.is_live_video_view(records, screen_size):
+            screen = self.capture_device_screen(device)
+            if self.is_live_video_view(records, screen_size, screen=screen):
                 self.log(
                     f"[{device}] Se abrió una transmisión Live, no una publicación normal; "
                     "la vista se rechaza para acciones."
@@ -4964,7 +5065,13 @@ class ProfessionalPhoneController:
         return False
 
     def confirm_actionable_open_post(
-        self, device, screen_size, attempts=2, delay=0.45, post_reference=None
+        self,
+        device,
+        screen_size,
+        attempts=2,
+        delay=0.45,
+        post_reference=None,
+        require_post_header=False,
     ):
         """Confirma publicación, ausencia de `<` inferior e identidad del encabezado."""
         for attempt in range(max(1, attempts)):
@@ -4972,7 +5079,8 @@ class ProfessionalPhoneController:
             records = self.accessibility_text_records(hierarchy)
             ocr_records = self.windows_ocr_records(device)
             records.extend(ocr_records)
-            if self.is_live_video_view(records, screen_size):
+            screen = self.capture_device_screen(device)
+            if self.is_live_video_view(records, screen_size, screen=screen):
                 self.log(
                     f"[{device}] La URL resolvió a una transmisión Live; "
                     "no se considera una publicación accionable."
@@ -4980,9 +5088,11 @@ class ProfessionalPhoneController:
                 return False
             if self.is_facebook_feed_hierarchy(hierarchy, screen_size):
                 return False
-            screen = self.capture_device_screen(device)
-            back_control = self.find_intermediate_back_control(
-                hierarchy, screen_size, ocr_records, screen=screen
+            top_publication_header = self.has_top_back_publication_header(records, screen_size)
+            back_control = None if self.has_open_post_header(records, screen_size) else (
+                self.find_intermediate_back_control(
+                    hierarchy, screen_size, ocr_records, screen=screen
+                )
             )
             if back_control:
                 self.log(
@@ -4994,6 +5104,12 @@ class ProfessionalPhoneController:
                 self.is_open_post_view(records, screen_size)
                 or self.is_open_post_hierarchy(hierarchy, screen_size)
             ):
+                if require_post_header and not top_publication_header:
+                    self.log(
+                        f"[{device}] La vista no muestra '< Publicación de' arriba; "
+                        "todavía no es segura para acciones."
+                    )
+                    return False
                 if self.post_reference_matches(records, post_reference):
                     return True
                 expected = (post_reference or {}).get("header_anchor", "")

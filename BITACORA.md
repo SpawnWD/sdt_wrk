@@ -21,6 +21,45 @@ Esta bitácora registra el estado base del proyecto y todos los cambios que se r
 
 ## Cambios completados
 
+### CHG-20261113-0804 — Validación visual VIVO y retorno a “Publicación de”
+
+- Fecha y hora de inicio: 2026-11-13 08:04:58 (America/Mexico_City)
+- Estado: Completado y validado en el teléfono real el 2026-11-13 08:09:57 (America/Mexico_City)
+- Tipo: Corrección de navegación posterior al enlace
+- Solicitud: Si el enlace abre una pantalla con `VIVO` blanco sobre fondo rojo en la parte superior, ejecutar Atrás y permitir acciones sólo cuando la parte superior muestre `Publicación de`.
+- Diagnóstico real:
+  - El teléfono `W555NEU0100057516` está en una transmisión con fondo negro y un rectángulo rojo `VIVO` en la esquina superior izquierda.
+  - La jerarquía Android no expone texto alguno de esa pantalla y el OCR reconoció el nombre del perfil, pero omitió `VIVO`; por ello una validación exclusivamente textual no cubre esta variante.
+  - La insignia LIVE pequeña de un avatar dentro de una publicación normal no debe provocar Atrás.
+- Cambio previsto:
+  - Reconocer visualmente un rectángulo rojo grande en la franja superior izquierda y exigir trazos blancos interiores.
+  - Usar esa señal junto con las señales textuales existentes para identificar el Live.
+  - Recordar que se salió de un Live y exigir el encabezado superior `Publicación de` antes de habilitar Me gusta/Comentario.
+  - Mantener el respaldo de regreso al timestamp original si Atrás llega al feed.
+- Riesgos controlados: no confundir logos rojos ni insignias pequeñas, no ejecutar acciones en el Live y no hacer más de un regreso por detección confirmada.
+- Referencia de rollback: commit `c8c7b91` de la rama `integracion`.
+- Archivos previstos: `panel.py`, `LEEME.txt`, `Construir Ejecutable.ps1` y `BITACORA.md`.
+- Implementación:
+  - `locate_top_live_badge` segmenta rojo en HSV, exige un rectángulo grande dentro del 14 % superior izquierdo y valida una proporción mínima de píxeles blancos interiores.
+  - La detección Live combina la señal visual con los textos existentes y no se activa si existe un encabezado explícito de publicación.
+  - `has_top_back_publication_header` valida la secuencia superior `< Publicación de …`, incluida la variante donde OCR separa el símbolo y el texto.
+  - Después de detectar VIVO se envía un único Atrás; la recuperación y la confirmación accionable exigen esa cabecera antes de permitir Me gusta/Comentario.
+  - Si ya existe `Publicación de`, no se buscan controles `<` intermedios dentro del contenido; esto evita confundir el avatar con una flecha.
+- Pruebas realizadas:
+  - Pantalla Live real: detector encontró el rectángulo `(24,86)-(123,147)`, centro `(73,116)`.
+  - Pantalla de publicación real con insignia LIVE pequeña en el avatar: detector VIVO no produjo coincidencia.
+  - Atrás real enviado una vez desde el Live: regresó a `< Publicación de ULTRA Noticias`.
+  - La vista resultante dejó de clasificarse como Live y `confirm_actionable_open_post(..., require_post_header=True)` la aceptó.
+  - Se reprodujo y corrigió el falso `<` del avatar en `(60,215)`; la cabecera superior ahora se evalúa primero.
+  - No se ejecutó Me gusta ni Comentario durante las pruebas.
+  - `python -m py_compile panel.py license_guard.py`, `git diff --check`, compilación PyInstaller y comprobación SHA-256: correctos.
+- Archivos modificados: `panel.py`, `LEEME.txt`, `Construir Ejecutable.ps1` y `BITACORA.md`.
+- Entrega: `release_1.88.16/AdministracionDeMoviles.exe` (87,090,188 bytes) y `SHA256.txt`.
+- SHA-256: `E5C9C13D2B157A343A9AE466DFD5B896F22AF71FA22A5C0451A860175600B24F`.
+- Commit resultante: pendiente de crear.
+- Publicado o respaldado: pendiente de publicación en `integracion`.
+- Procedimiento de rollback: revertir el commit resultante o restaurar `c8c7b91` en una rama de recuperación.
+
 ### CHG-20261113-0751 — Rotación de la contraseña dinámica de activación
 
 - Fecha y hora de inicio: 2026-11-13 07:51:59 (America/Mexico_City)
