@@ -3076,6 +3076,85 @@ class ProfessionalPhoneController:
                 return True
         return False
 
+    def is_facebook_feed_hierarchy(self, hierarchy, screen_size):
+        """Reconoce la fila de pestañas del feed para no pulsar un falso Atrás."""
+        if hierarchy is None or not screen_size:
+            return False
+        width, height = screen_size
+        tabs = []
+        for node in hierarchy.iter("node"):
+            if node.attrib.get("clickable", "false").casefold() != "true":
+                continue
+            bounds = self.parse_node_bounds(node)
+            if not bounds:
+                continue
+            left, top, right, bottom = bounds
+            box_width = right - left
+            center_y = (top + bottom) / 2.0
+            if (
+                height * 0.075 <= center_y <= height * 0.19
+                and width * 0.12 <= box_width <= width * 0.24
+                and bottom - top <= height * 0.11
+            ):
+                tabs.append((left, right))
+        tabs.sort()
+        distinct = []
+        for bounds in tabs:
+            if not distinct or bounds[0] - distinct[-1][0] >= width * 0.08:
+                distinct.append(bounds)
+        return len(distinct) >= 4
+
+    def find_intermediate_back_control(self, hierarchy, screen_size, ocr_records=None):
+        """Localiza el `<` lateral de una pantalla intermedia, no el del post."""
+        if hierarchy is None or not screen_size:
+            return None
+        width, height = screen_size
+        back_labels = ("atras", "volver", "regresar", "back", "navigate up", "ir atras")
+        back_glyphs = {"<", "‹", "〈", "←"}
+        candidates = []
+        for node in hierarchy.iter("node"):
+            if node.attrib.get("visible-to-user", "true").casefold() == "false":
+                continue
+            if node.attrib.get("enabled", "true").casefold() == "false":
+                continue
+            bounds = self.parse_node_bounds(node)
+            if not bounds:
+                continue
+            left, top, right, bottom = bounds
+            center = ((left + right) // 2, (top + bottom) // 2)
+            if not (center[0] <= width * 0.22 and height * 0.14 <= center[1] <= height * 0.86):
+                continue
+            labels = self.normalized_node_labels(node)
+            labeled_back = any(
+                label in back_glyphs or any(term == label or term in label for term in back_labels)
+                for label in labels
+            )
+            clickable = node.attrib.get("clickable", "false").casefold() == "true"
+            box_width, box_height = right - left, bottom - top
+            geometric_back = (
+                clickable
+                and left <= width * 0.055
+                and width * 0.055 <= box_width <= width * 0.24
+                and height * 0.022 <= box_height <= height * 0.13
+            )
+            if labeled_back or geometric_back:
+                priority = 0 if labeled_back else 2
+                candidates.append((priority, abs(center[1] - height // 2), center, "accesibilidad" if labeled_back else "geometría"))
+        for record in ocr_records or []:
+            bounds = record.get("bounds")
+            label = self.normalize_search_text(record.get("text", "")).strip()
+            if not bounds or label not in back_glyphs:
+                continue
+            left, top, right, bottom = bounds
+            center = ((left + right) // 2, (top + bottom) // 2)
+            if center[0] <= width * 0.22 and height * 0.14 <= center[1] <= height * 0.86:
+                candidates.append((1, abs(center[1] - height // 2), center, "OCR"))
+        if not candidates:
+            return None
+        candidates.sort(key=lambda item: (item[0], item[1]))
+        _, _, point, source = candidates[0]
+        return {"point": point, "source": source}
+
     def has_ad_label_above(self, records, target_y, screen_height, max_distance_ratio=0.30):
         for record in records:
             if not self.is_ad_label_record(record):
@@ -3638,19 +3717,78 @@ class ProfessionalPhoneController:
                         return candidate
         return None
 
-    def return_from_settings_to_post(self, device):
-        for _ in range(5):
+    def return_from_settings_to_post(self, device, screen_size=None, post_url=None):
+        """Regresa desde Ajustes y recupera exactamente la publicación original."""
+        screen_size = screen_size or self.get_device_screen_size(device) or (1080, 1920)
+        for _ in range(6):
             if self.facebook_is_foreground(device):
                 break
             self.run_on_device(device, ["shell", "input", "keyevent", "4"])
             if self.wait_or_cancel(0.35, self.search_stop_event):
-                return
-        if self.facebook_is_foreground(device):
-            # Copiar enlace conserva dos hojas inferiores abiertas en FB Lite.
-            self.run_on_device(device, ["shell", "input", "keyevent", "4"])
-            self.wait_or_cancel(0.25, self.search_stop_event)
-            self.run_on_device(device, ["shell", "input", "keyevent", "4"])
-            self.wait_or_cancel(0.45, self.search_stop_event)
+                return False
+        if not self.facebook_is_foreground(device):
+            self.log(f"[{device}] No se recuperó Facebook después de leer el enlace en Ajustes.")
+            return False
+
+        for step in range(6):
+            if self.search_stop_event.is_set():
+                return False
+            hierarchy = self.get_android_hierarchy(device)
+            records = self.accessibility_text_records(hierarchy)
+            ocr_records = self.windows_ocr_records(device)
+            records.extend(ocr_records)
+            if (
+                self.is_open_post_view(records, screen_size)
+                or self.is_open_post_hierarchy(hierarchy, screen_size)
+            ):
+                self.log(f"[{device}] Publicación original recuperada después de obtener el enlace.")
+                return True
+            if self.is_facebook_feed_hierarchy(hierarchy, screen_size):
+                self.log(f"[{device}] El retorno llegó al feed antes que a la publicación.")
+                break
+            back_control = self.find_intermediate_back_control(hierarchy, screen_size, ocr_records)
+            if back_control:
+                point = back_control["point"]
+                self.log(
+                    f"[{device}] Pantalla intermedia: control < localizado por "
+                    f"{back_control['source']} en {point}; regresando un paso."
+                )
+                ok, detail = self.run_on_device(
+                    device,
+                    ["shell", "input", "tap", str(point[0]), str(point[1])],
+                    timeout=15,
+                )
+            else:
+                self.log(
+                    f"[{device}] Estado intermedio sin control < accesible; "
+                    f"se ejecuta un solo Atrás ({step + 1}/6) y se vuelve a inspeccionar."
+                )
+                ok, detail = self.run_on_device(
+                    device, ["shell", "input", "keyevent", "4"], timeout=15
+                )
+            if not ok:
+                self.log(f"[{device}] No se pudo retroceder hacia la publicación: {detail}")
+                break
+            if self.wait_or_cancel(0.60, self.search_stop_event):
+                return False
+
+        if post_url and self.is_facebook_url(post_url):
+            self.log(f"[{device}] Se reabrirá el enlace capturado para recuperar la publicación exacta.")
+            ok, detail = self.run_on_device(
+                device,
+                ["shell", "am", "start", "-a", "android.intent.action.VIEW", "-d", post_url, "com.facebook.lite"],
+                timeout=20,
+            )
+            if not ok:
+                self.log(f"[{device}] No se pudo reabrir la publicación: {detail}")
+                return False
+            if self.wait_or_cancel(1.4, self.search_stop_event):
+                return False
+            if self.confirm_open_post(device, screen_size, attempts=4, delay=0.65):
+                self.log(f"[{device}] Publicación original reabierta y confirmada mediante su enlace.")
+                return True
+        self.log(f"[{device}] No se logró recuperar una vista confirmada de la publicación.")
+        return False
 
     def capture_open_post_link(self, device, screen_size):
         """Copia y lee el enlace de la publicación abierta sin instalar auxiliares."""
@@ -3659,7 +3797,10 @@ class ProfessionalPhoneController:
         width, height = screen_size
         hierarchy = self.get_android_hierarchy(device)
         records = self.accessibility_text_records(hierarchy) + self.windows_ocr_records(device)
-        if not self.is_open_post_view(records, screen_size):
+        if not (
+            self.is_open_post_view(records, screen_size)
+            or self.is_open_post_hierarchy(hierarchy, screen_size)
+        ):
             self.log(f"[{device}] No se confirmó una publicación abierta; no se intentó copiar su enlace.")
             return None
 
@@ -3715,6 +3856,7 @@ class ProfessionalPhoneController:
             self.run_on_device(device, ["shell", "input", "keyevent", "4"])
             return None
 
+        url = None
         try:
             self.run_on_device(device, ["shell", "am", "start", "-a", "android.settings.SETTINGS"])
             if self.wait_or_cancel(0.80, self.search_stop_event):
@@ -3752,7 +3894,7 @@ class ProfessionalPhoneController:
                 self.log(f"[{device}] El contenido pegado no fue un enlace válido de Facebook.")
             return url
         finally:
-            self.return_from_settings_to_post(device)
+            self.return_from_settings_to_post(device, screen_size, post_url=url)
 
     def save_search_link_record(self, device, snapshot, url):
         if not url:
@@ -3837,21 +3979,33 @@ class ProfessionalPhoneController:
         if not size:
             return "screen_error"
         width, height = size
-        for attempt in range(9):
+        max_scrolls = 18
+        for attempt in range(max_scrolls + 1):
             hierarchy = self.get_android_hierarchy(device)
             result = self.apply_like_action(device, hierarchy, stop_event=self.search_stop_event)
             if result == "not_found":
                 result = self.apply_calculated_figure_action(device, "like", self.search_stop_event)
             if result != "not_found":
                 return result
-            if attempt < 8:
+            if attempt < max_scrolls:
+                self.log(
+                    f"[{device}] Me gusta aún no visible; desplazando la publicación larga "
+                    f"({attempt + 1}/{max_scrolls})."
+                )
                 ok, _ = self.run_on_device(
                     device,
-                    ["shell", "input", "swipe", str(width//2), str(int(height*0.80)), str(width//2), str(int(height*0.32)), "700"],
+                    [
+                        "shell", "input", "swipe", str(width//2), str(int(height*0.82)),
+                        str(width//2), str(int(height*0.24)), "650",
+                    ],
                     timeout=15,
                 )
-                if not ok or self.wait_or_cancel(0.9, self.search_stop_event):
+                if not ok or self.wait_or_cancel(0.85, self.search_stop_event):
                     break
+        self.log(
+            f"[{device}] No se localizó Me gusta después de revisar la publicación "
+            f"y realizar hasta {max_scrolls} desplazamientos."
+        )
         return "not_found"
 
     def bottom_comment_editor_top(self, hierarchy, screen_size):
@@ -4355,7 +4509,16 @@ class ProfessionalPhoneController:
                             post_url = self.capture_open_post_link(dev, size)
                             record_path, link_added = self.save_search_link_record(dev, snapshot, post_url)
                         if like_on_match or comment_on_match:
-                            if self.confirm_open_post(dev, size, attempts=2):
+                            post_ready = self.confirm_open_post(dev, size, attempts=2)
+                            if not post_ready:
+                                self.log(
+                                    f"[{dev}] Después de obtener el enlace no se confirmó la publicación; "
+                                    "se intentará recuperar la pantalla intermedia antes de las acciones."
+                                )
+                                post_ready = self.return_from_settings_to_post(
+                                    dev, size, post_url=post_url
+                                )
+                            if post_ready:
                                 like_result, comment_result = self.perform_selected_search_actions(
                                     dev,
                                     like_on_match,
@@ -4366,8 +4529,8 @@ class ProfessionalPhoneController:
                                 )
                             else:
                                 self.log(
-                                    f"[{dev}] Después de obtener el enlace ya no se confirmó la publicación; "
-                                    "se omiten Me gusta y Comentario."
+                                    f"[{dev}] No se recuperó la publicación exacta después del enlace; "
+                                    "se omiten Me gusta y Comentario para no actuar en otra pantalla."
                                 )
                     else:
                         self.log(

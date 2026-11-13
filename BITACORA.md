@@ -21,6 +21,37 @@ Esta bitácora registra el estado base del proyecto y todos los cambios que se r
 
 ## Cambios completados
 
+### CHG-20261112-1931 — Recuperación posterior al enlace y scroll largo para Me gusta
+
+- Fecha y hora de inicio: 2026-11-12 19:31:34 (America/Mexico_City)
+- Estado: Completado localmente el 2026-11-12 19:36:51 (America/Mexico_City)
+- Tipo: Corrección de navegación y búsqueda visual
+- Solicitud: Con `Me gusta` y `Guardar enlace` seleccionados, obtener el enlace, regresar desde la pantalla intermedia marcada con `<`, recuperar la publicación original, desplazar una publicación larga hasta encontrar Me gusta y finalmente volver al feed para continuar la búsqueda.
+- Diagnóstico inicial: la lectura del portapapeles abre Ajustes y el retorno actual ejecuta dos Atrás fijos al recuperar Facebook; esa cantidad no representa todos los estados posibles y puede dejar una pantalla intermedia o sobrepasar la publicación. La búsqueda de Me gusta ya desplaza, pero está limitada a ocho gestos sin registrar ni validar la recuperación previa.
+- Alcance: retorno guiado por estado, identificación del `<` intermedio, reapertura segura mediante el enlace recién obtenido cuando sea necesario, scroll progresivo para Me gusta, documentación, pruebas y ejecutable.
+- Riesgo controlado: no pulsar controles laterales del feed como si fueran Atrás; antes de tocar se distinguirán publicación, pantalla intermedia y feed.
+- Referencia de rollback: commit `1ce2e1b` de la rama `integracion`.
+- Implementación:
+  - Sustituye los dos Atrás fijos posteriores a Ajustes por una inspección de hasta seis transiciones.
+  - Distingue publicación abierta, feed y pantalla intermedia. El feed se reconoce por su fila de pestañas para no confundir tarjetas laterales con el control de regreso.
+  - En una pantalla intermedia localiza `<`, `Atrás`, `Volver`, `Back` o su botón geométrico lateral y retrocede exactamente un paso antes de volver a inspeccionar.
+  - Si el retorno sobrepasa la publicación y llega al feed, reabre la URL que acaba de copiar y confirma la publicación antes de ejecutar acciones.
+  - El trabajador de Búsqueda repite esta recuperación si la primera comprobación posterior al enlace no confirma la publicación; si aun así falla, omite las acciones para no tocar otra pantalla.
+  - Me gusta se busca en la pantalla inicial y después de hasta 18 desplazamientos amplios, deteniéndose inmediatamente al localizar el control accesible o la figura validada.
+- Pruebas realizadas:
+  - Pantalla intermedia simulada: detectó el botón lateral en `(50,700)`, ejecutó un solo toque y confirmó después la publicación.
+  - Feed simulado: no tocó sus controles y reabrió la URL mediante Facebook Lite; la publicación fue confirmada.
+  - Publicación larga simulada: realizó tres desplazamientos y se detuvo al encontrar Me gusta en el cuarto análisis.
+  - Pantalla real actual de `720×1520`: reconoció correctamente el feed; aunque existía un falso candidato geométrico en `(68,859)`, quedó bloqueado por la confirmación previa del feed y no se tocó.
+  - Compilación de `panel.py` y `license_guard.py`, `git diff --check`, verificación de hash y constructor PyInstaller: correctos.
+  - No se dio Me gusta, no se escribió ni se publicó ningún comentario durante las pruebas.
+- Archivos modificados: `panel.py`, `LEEME.txt`, `Construir Ejecutable.ps1` y `BITACORA.md`.
+- Entrega: `release_1.88.3/AdministracionDeMoviles.exe` (87,069,287 bytes) y `SHA256.txt`.
+- SHA-256: `F25F9C32FF84AF447DB2E863B015B3E95F2800404145365A16C2D08095EC09D9`.
+- Commit resultante: el commit de la rama `integracion` que contiene esta entrada.
+- Publicado o respaldado: pendiente de publicación en `integracion`.
+- Procedimiento de rollback: revertir el commit resultante o restaurar `1ce2e1b` en una rama de recuperación.
+
 ### CHG-20261112-1835 — Regreso visual desde publicación abierta al feed
 
 - Fecha y hora de inicio: 2026-11-12 18:35:10 (America/Mexico_City)
