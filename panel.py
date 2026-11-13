@@ -3203,44 +3203,8 @@ class ProfessionalPhoneController:
                 break
         return last_hierarchy, last_accessibility, last_ocr, expanded
 
-    def is_post_timestamp_record(self, record, screen_size):
-        text_value = self.normalize_search_text(record.get("text", "")).strip()
-        bounds = record.get("bounds")
-        if not text_value or not bounds or not screen_size:
-            return False
-        if record.get("timestamp_candidate"):
-            return True
-        width, height = screen_size
-        left, top, right, bottom = bounds
-        center_x, center_y = (left + right) / 2.0, (top + bottom) / 2.0
-        if center_y < height * 0.15 or center_x > width * 0.62:
-            return False
-        if right - left > width * 0.48 or len(text_value) > 38:
-            return False
-        standard = re.match(
-            r"^(?:hace\s+)?\d{1,3}\s*(?:min(?:uto)?s?|m|h|hora?s?|d|dia?s?|sem(?:ana)?s?|a|ano?s?)\b",
-            text_value,
-        )
-        if standard:
-            return True
-        embedded = re.search(
-            r"(?:^|\s|[^\w\s])\d{1,3}\s*(?:min(?:uto)?s?|m|h|hora?s?|d|dia?s?|sem(?:ana)?s?|a|ano?s?)\b",
-            text_value,
-        )
-        if embedded:
-            return True
-        # OCR puede leer la h pequeña como "11" (por ejemplo: 9 h -> 911).
-        compact = re.sub(r"\s+", "", text_value)
-        if re.match(r"^\d{1,2}(?:11|ii|ll|l1)(?:\W.*)?$", compact):
-            return True
-        begins_with_number = bool(re.match(r"^\d{1,3}", text_value))
-        has_audience_separator = "·" in text_value or "•" in text_value
-        return begins_with_number and has_audience_separator
-
-    def post_timestamp_click_point(self, record):
-        bounds = record.get("bounds")
-        if not bounds:
-            return None
+    def post_timestamp_word_point(self, record):
+        """Devuelve sólo el centro de las palabras que forman una fecha/hora."""
         words = record.get("words", [])
         unit_pattern = re.compile(r"^(?:min(?:uto)?s?|m|h|hora?s?|d|dia?s?|sem(?:ana)?s?|a|ano?s?)$")
         compact_time = re.compile(r"^\d{1,3}(?:min|m|h|d|sem|a)$")
@@ -3261,6 +3225,53 @@ class ProfessionalPhoneController:
                         (previous_bounds[0] + word_bounds[2]) // 2,
                         (min(previous_bounds[1], word_bounds[1]) + max(previous_bounds[3], word_bounds[3])) // 2,
                     )
+        return None
+
+    def is_post_timestamp_record(self, record, screen_size):
+        text_value = self.normalize_search_text(record.get("text", "")).strip()
+        bounds = record.get("bounds")
+        if not text_value or not bounds or not screen_size:
+            return False
+        if record.get("timestamp_candidate"):
+            return True
+        width, height = screen_size
+        left, top, right, bottom = bounds
+        center_x, center_y = (left + right) / 2.0, (top + bottom) / 2.0
+        if center_y < height * 0.15 or center_x > width * 0.62:
+            return False
+        record_width = right - left
+        if record_width > width * 0.76 or len(text_value) > 88:
+            return False
+        standard = re.match(
+            r"^(?:hace\s+)?\d{1,3}\s*(?:min(?:uto)?s?|m|h|hora?s?|d|dia?s?|sem(?:ana)?s?|a|ano?s?)\b",
+            text_value,
+        )
+        if standard:
+            return True
+        embedded = re.search(
+            r"(?:^|\s|[^\w\s])\d{1,3}\s*(?:min(?:uto)?s?|m|h|hora?s?|d|dia?s?|sem(?:ana)?s?|a|ano?s?)\b",
+            text_value,
+        )
+        if embedded:
+            # Una fecha puede compartir línea con un nombre largo de página. Para
+            # superar el límite histórico de 48 %, exigimos palabras OCR que
+            # permitan pulsar exactamente el segmento temporal, no el perfil.
+            return record_width <= width * 0.48 or self.post_timestamp_word_point(record) is not None
+        # OCR puede leer la h pequeña como "11" (por ejemplo: 9 h -> 911).
+        compact = re.sub(r"\s+", "", text_value)
+        if re.match(r"^\d{1,2}(?:11|ii|ll|l1)(?:\W.*)?$", compact):
+            return True
+        begins_with_number = bool(re.match(r"^\d{1,3}", text_value))
+        has_audience_separator = "·" in text_value or "•" in text_value
+        return begins_with_number and has_audience_separator
+
+    def post_timestamp_click_point(self, record):
+        bounds = record.get("bounds")
+        if not bounds:
+            return None
+        word_point = self.post_timestamp_word_point(record)
+        if word_point:
+            return word_point
         left, top, right, bottom = bounds
         return ((left + right) // 2, (top + bottom) // 2)
 

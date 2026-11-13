@@ -21,6 +21,39 @@ Esta bitácora registra el estado base del proyecto y todos los cambios que se r
 
 ## Cambios completados
 
+### CHG-20261112-2006 — Coincidencia OCR con fecha integrada en encabezado ancho
+
+- Fecha y hora de inicio: 2026-11-12 20:06:47 (America/Mexico_City)
+- Estado: Completado localmente el 2026-11-12 20:08:41 (America/Mexico_City)
+- Tipo: Corrección del detector de coincidencias
+- Solicitud: Revisar por qué la publicación visible que contiene la frase completa `farmacia monte` no fue identificada por Búsqueda.
+- Diagnóstico real:
+  - OCR leyó `¡OFERTA ESPECIAL EN FARMACIA` y `MONTE DE YAVÉ!` en dos líneas consecutivas, además de una segunda aparición `Exclusivamente en Farmacia Monte de`.
+  - La publicación no contiene `Publicidad`, `Patrocinado` ni otra etiqueta publicitaria.
+  - OCR leyó la fecha dentro del encabezado `Informativo Alcance · 1 h ·` con límites `(136,867)-(482,891)`.
+  - El ancho fue `346 px`; el límite vigente era `48 %` de `720 px`, equivalente a `345.6 px`. La diferencia de `0.4 px` descartó la fecha y dejó la coincidencia sin publicación asociada.
+- Alcance: aceptar encabezados OCR más anchos únicamente cuando sus palabras contienen una fecha/hora verificable, pulsar sólo el segmento temporal, pruebas con la captura real, documentación y ejecutable.
+- Riesgo controlado: no convertir cualquier línea ancha con números en fecha; se exigirá una combinación explícita como `1` + `h`, `48` + `min` o una unidad compacta válida.
+- Referencia de rollback: commit `d39d8c7` de la rama `integracion`.
+- Implementación:
+  - Extrae en una función independiente el centro exacto de palabras temporales como `1` + `h`, `48` + `min` o `9h`.
+  - Amplía hasta `76 %` el ancho permitido de una línea OCR con fecha integrada, en coherencia con el detector geométrico de encabezados.
+  - Cuando la línea supera el límite histórico de `48 %`, sólo se acepta si existe geometría OCR de palabras que permita pulsar exclusivamente la fecha/hora.
+  - `post_timestamp_click_point` reutiliza la misma geometría verificada; sin palabras temporales conserva su comportamiento seguro anterior.
+- Pruebas realizadas:
+  - Captura real de `720×1520`: `farmacia monte` fue reconocida como frase completa en dos líneas y también en una segunda aparición.
+  - La publicación fue asociada con `Informativo Alcance · 1 h ·`; el punto temporal calculado fue `(408,878)`.
+  - La publicación real no fue clasificada como publicidad.
+  - Caso negativo: un encabezado ancho con texto `1 h` pero sin límites OCR de palabras fue rechazado.
+  - Compilación de `panel.py` y `license_guard.py`, `git diff --check`, verificación de hash y constructor PyInstaller: correctos.
+  - No se abrió la publicación ni se ejecutaron Me gusta o Comentario durante las pruebas.
+- Archivos modificados: `panel.py`, `LEEME.txt`, `Construir Ejecutable.ps1` y `BITACORA.md`.
+- Entrega: `release_1.88.5/AdministracionDeMoviles.exe` (87,074,479 bytes) y `SHA256.txt`.
+- SHA-256: `8D88B760839C819DA88FD73FCB5B4ADEA6F38E8BB884EE99B8F352F5C9D3924F`.
+- Commit resultante: el commit de la rama `integracion` que contiene esta entrada.
+- Publicado o respaldado: pendiente de publicación en `integracion`.
+- Procedimiento de rollback: revertir el commit resultante o restaurar `d39d8c7` en una rama de recuperación.
+
 ### CHG-20261112-1956 — Acciones validadas por la fila completa de la publicación
 
 - Fecha y hora de inicio: 2026-11-12 19:56:14 (America/Mexico_City)
