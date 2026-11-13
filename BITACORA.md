@@ -48,8 +48,8 @@ Esta bitácora registra el estado base del proyecto y todos los cambios que se r
 - Archivos modificados: `license_guard.py`, `LEEME.txt`, `Construir Ejecutable.ps1` y `BITACORA.md`.
 - Entrega: `release_1.88.15/AdministracionDeMoviles.exe` (87,086,695 bytes) y `SHA256.txt`.
 - SHA-256: `35373AAFDB88299B0D52AF654C348C663B72E0FD229894F674D0AB0E2EC28389`.
-- Commit resultante: pendiente de crear.
-- Publicado o respaldado: pendiente de publicación en `integracion`.
+- Commit funcional resultante: `43e3bea` (`security: rotar contraseña dinamica de licencia`).
+- Publicado o respaldado: Sí; cambio funcional publicado en la rama `integracion` de GitHub.
 - Procedimiento de rollback: revertir el commit resultante o restaurar `f3fff99` en una rama de recuperación; la versión 1 de licencia volvería a ser aceptada por esa versión anterior.
 
 ### CHG-20261113-0747 — Recuperar publicación cuando el enlace abre un Live
