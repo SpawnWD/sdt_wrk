@@ -3886,6 +3886,55 @@ class ProfessionalPhoneController:
                         return candidate
         return None
 
+    def read_facebook_url_from_records(self, records):
+        """Respaldo OCR para recuperar una URL pegada que UIAutomator no expone."""
+        values = [record.get("text", "").strip() for record in records or []]
+        values.append(" ".join(value for value in values if value))
+        for value in values:
+            if not value or "facebook" not in self.normalize_search_text(value):
+                continue
+            compact = re.sub(r"\s+", "", value)
+            compact = compact.replace("facebook,com", "facebook.com")
+            for candidate in re.findall(r"https?://[^\s]+", compact, flags=re.IGNORECASE):
+                candidate = candidate.rstrip(".,);]}>|'\"")
+                if self.is_facebook_url(candidate):
+                    return candidate
+        return None
+
+    def open_captured_post_for_actions(self, device, screen_size, post_url):
+        """Abre la URL exacta y sólo la habilita si Facebook confirma un post limpio."""
+        if not post_url or not self.is_facebook_url(post_url):
+            return False
+        self.log(f"[{device}] Abriendo el vínculo capturado antes de ejecutar acciones: {post_url}")
+        ok, detail = self.run_on_device(
+            device,
+            [
+                "shell", "am", "start", "-a", "android.intent.action.VIEW",
+                "-d", post_url, "com.facebook.lite",
+            ],
+            timeout=20,
+        )
+        if not ok:
+            self.log(f"[{device}] No se pudo abrir el vínculo capturado: {detail}")
+            return False
+        if self.wait_or_cancel(1.6, self.search_stop_event):
+            return False
+        if not self.confirm_actionable_open_post(
+            device, screen_size, attempts=5, delay=0.70, post_reference=None
+        ):
+            self.log(f"[{device}] El vínculo se abrió, pero no se confirmó una publicación limpia.")
+            return False
+        self.search_link_recovery[device] = {
+            "ready": True,
+            "via_url": True,
+            "post_url": post_url,
+        }
+        self.log(
+            f"[{device}] Vínculo abierto y publicación confirmada; "
+            "Me gusta/Comentario se ejecutarán en esta vista."
+        )
+        return True
+
     def return_from_settings_to_post(self, device, screen_size=None, post_url=None, post_reference=None):
         """Regresa desde Ajustes y recupera exactamente la publicación original."""
         self.search_link_recovery[device] = {
@@ -4086,28 +4135,26 @@ class ProfessionalPhoneController:
             if self.wait_or_cancel(0.65, self.search_stop_event):
                 return None
             self.run_on_device(device, ["shell", "input", "keyevent", "279"])
-            if self.wait_or_cancel(0.45, self.search_stop_event):
-                return None
-            pasted_hierarchy = self.get_android_hierarchy(device)
-            url = self.read_pasted_facebook_url(pasted_hierarchy)
-            if not url:
-                # Algunos teclados necesitan terminar de enfocarse antes de aceptar KEYCODE_PASTE.
-                if self.wait_or_cancel(0.40, self.search_stop_event):
-                    return None
-                self.run_on_device(device, ["shell", "input", "keyevent", "279"])
-                if self.wait_or_cancel(0.45, self.search_stop_event):
+            for read_attempt in range(3):
+                if self.wait_or_cancel(0.45 if read_attempt == 0 else 0.40, self.search_stop_event):
                     return None
                 pasted_hierarchy = self.get_android_hierarchy(device)
                 url = self.read_pasted_facebook_url(pasted_hierarchy)
+                if not url:
+                    url = self.read_facebook_url_from_records(self.windows_ocr_records(device))
+                if url:
+                    break
             if url:
                 self.log(f"[{device}] Enlace de publicación capturado: {url}")
             else:
                 self.log(f"[{device}] El contenido pegado no fue un enlace válido de Facebook.")
             return url
         finally:
-            self.return_from_settings_to_post(
-                device, screen_size, post_url=url, post_reference=post_reference
-            )
+            opened_from_url = self.open_captured_post_for_actions(device, screen_size, url)
+            if not opened_from_url:
+                self.return_from_settings_to_post(
+                    device, screen_size, post_url=url, post_reference=post_reference
+                )
 
     def save_search_link_record(self, device, snapshot, url):
         if not url:
@@ -4330,7 +4377,11 @@ class ProfessionalPhoneController:
     def apply_confirmed_action_row_like(self, device, row, stop_event=None):
         """Pulsa Me gusta sólo dentro de una fila completa previamente validada."""
         visual = row.get("like_visual")
-        if visual and visual.get("active"):
+        initial_screen = self.capture_device_screen(device)
+        if (
+            (visual and visual.get("active"))
+            or self.is_reel_like_active(initial_screen, row["like"])
+        ):
             self.log(f"[{device}] El Me gusta de la fila confirmada ya aparece activo.")
             return "already_liked"
         point = visual["point"] if visual else row["like"]
@@ -4345,7 +4396,10 @@ class ProfessionalPhoneController:
             return "cancelled"
         screen = self.capture_device_screen(device)
         verification = self.locate_action_figure(screen, "like_outline.png", (0.00, 0.38))
-        if verification and verification.get("active"):
+        if (
+            (verification and verification.get("active"))
+            or self.is_reel_like_active(screen, row["like"])
+        ):
             self.log(f"[{device}] Me gusta confirmado visualmente en color activo.")
             return "confirmed"
         hierarchy = self.get_android_hierarchy(device)

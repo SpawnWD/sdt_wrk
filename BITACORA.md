@@ -21,6 +21,39 @@ Esta bitácora registra el estado base del proyecto y todos los cambios que se r
 
 ## Cambios completados
 
+### CHG-20261113-0046 — Acción garantizada sobre el vínculo capturado
+
+- Fecha y hora de inicio: 2026-11-13 00:46:12 (America/Mexico_City)
+- Estado: Completado y validado en el teléfono real el 2026-11-13 00:53:46 (America/Mexico_City)
+- Tipo: Corrección y prueba funcional controlada
+- Solicitud: Probar Búsqueda con `artemio`; después de obtener el vínculo, abrir exactamente ese vínculo, realizar Me gusta según la configuración y regresar al feed.
+- Diagnóstico en ejecución 1.88.8: Android abrió Ajustes a las 00:05:57 y la búsqueda de Ajustes a las 00:06:03, pero no hubo un `VIEW` posterior hacia Facebook ni se creó el CSV del día. La lectura del texto pegado devolvió una URL vacía y el proceso regresó al feed para continuar el scroll.
+- Alcance: respaldo OCR para leer la URL pegada, apertura obligatoria de la URL válida antes de acciones, validación del post abierto, ejecución de Me gusta y retorno al feed.
+- Riesgo controlado: una URL inválida no habilita acciones; se realizó un único Me gusta real sobre la publicación coincidente solicitada por el usuario.
+- Referencia de rollback: commit `6d8e2ba` de la rama `integracion`.
+- Implementación:
+  - Añade lectura OCR del campo de búsqueda de Ajustes cuando UIAutomator no expone el vínculo pegado.
+  - Observa el campo hasta tres veces sin volver a pegar, evitando concatenar o corromper la URL.
+  - Toda URL válida se abre obligatoriamente mediante `android.intent.action.VIEW` antes de Me gusta/Comentario; el regreso por encabezado queda como respaldo si la apertura falla.
+  - Confirma una publicación limpia antes de entregar la vista a las acciones seleccionadas.
+  - Me gusta revisa directamente la proporción de azul dentro del contenedor izquierdo antes y después del toque, además de las verificaciones por plantilla y accesibilidad.
+- Prueba funcional real:
+  - Coincidencia encontrada: `Artemio Hernández Garrido`, encabezado `Claudia Medrano · 21 min`.
+  - Vínculo capturado y guardado: `https://www.facebook.com/share/p/1RMnh6ADwy/` en `registros_busqueda/enlaces_2026-11-13.csv`.
+  - El mismo vínculo se abrió explícitamente y Facebook confirmó la publicación.
+  - La fila completa Me gusta/Comentar/Compartir fue localizada después de dos desplazamientos seguros.
+  - Me gusta fue pulsado una vez; una reapertura de verificación mostró el pulgar azul y contador `1`.
+  - El detector actualizado reconoció correctamente el azul en la captura real.
+  - El regreso al feed fue confirmado y la publicación original volvió a quedar visible.
+  - No se publicó ningún comentario.
+- Pruebas adicionales: URL OCR reconstruida, `VIEW` obligatorio, rechazo de URL inválida, compilación de `panel.py` y `license_guard.py`, `git diff --check`, hash y construcción PyInstaller correctos.
+- Archivos modificados: `panel.py`, `LEEME.txt`, `Construir Ejecutable.ps1` y `BITACORA.md`.
+- Entrega: `release_1.88.9/AdministracionDeMoviles.exe` (87,080,186 bytes) y `SHA256.txt`.
+- SHA-256: `3E7AAC3EC74169005FE7DA6C4F28FC02D5008517AC0CE74F027896518370D5ED`.
+- Commit resultante: el commit de la rama `integracion` que contiene esta entrada.
+- Publicado o respaldado: pendiente de publicación en `integracion`.
+- Procedimiento de rollback: revertir el commit resultante o restaurar `6d8e2ba` en una rama de recuperación.
+
 ### CHG-20261112-2103 — Acciones sobre el enlace recuperado desde el feed
 
 - Fecha y hora de inicio: 2026-11-12 21:03:26 (America/Mexico_City)
