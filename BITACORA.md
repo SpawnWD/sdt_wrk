@@ -21,6 +21,40 @@ Esta bitácora registra el estado base del proyecto y todos los cambios que se r
 
 ## Cambios completados
 
+### CHG-20261114-0055 — Interfaz adaptable para resoluciones pequeñas
+
+- Fecha y hora de inicio: 2026-11-14 00:55:03 (America/Mexico_City).
+- Estado: Completado y validado visualmente el 2026-11-14 01:03:12 (America/Mexico_City).
+- Tipo: Mejora de interfaz / Diseño adaptable.
+- Solicitud: Evitar que botones y controles se oculten en pantallas con menor resolución.
+- Alcance previsto:
+  - Calcular el tamaño inicial y mínimo con base en el área real de la pantalla.
+  - Reducir navegación y espacios verticales en modo compacto.
+  - Reorganizar las barras densas de Dispositivos, Interacciones y Secuencias en filas que conserven visibles sus acciones.
+  - Iniciar el registro de actividad contraído cuando la altura sea reducida, sin eliminarlo.
+- Riesgos controlados: conservar comandos, estados, selección de dispositivos, registro operativo y comportamiento en resoluciones amplias.
+- Referencia de rollback: commit `75446e3` de la rama `integracion`.
+- Archivos previstos: `panel.py`, `Construir Ejecutable.ps1`, `LEEME.txt` y `BITACORA.md`.
+- Implementación:
+  - El tamaño inicial y mínimo se calcula con el ancho y alto disponibles; el modo compacto se activa por debajo de 1180 × 760 píxeles útiles.
+  - En modo compacto se reducen encabezado, márgenes, navegación lateral y separaciones verticales.
+  - El registro de actividad inicia contraído y permanece disponible mediante `Mostrar`.
+  - Dispositivos distribuye selección y administración de pantallas en dos filas; `Inyectar Texto Simple` se mantiene encima del área de texto.
+  - Secuencias conserva ejecución, detención, edición y encabezado de la tabla dentro de una vista de 1024 × 720.
+  - Interacciones coloca Me gusta, Comentario, Ejecutar y Detener antes de los parámetros inferiores y reduce el campo de comentario en modo compacto.
+- Pruebas realizadas:
+  - `python -m py_compile panel.py license_guard.py` y `git diff --check`: correctos.
+  - Simulación visual 1024 × 720 de Dispositivos: ocho acciones de gestión, tareas básicas e inyección visibles.
+  - Simulación visual 1024 × 720 de Secuencias: Capturar, Cargar, Guardar, Agregar, Ejecutar, Detener, Subir, Bajar, Eliminar, Limpiar y tabla visibles.
+  - Simulación visual 1024 × 720 de Interacciones: opciones, Ejecutar, Detener y tiempos visibles.
+  - Arranque real de `TERAsoft.exe` 1.88.20 con teléfono conectado: correcto.
+  - Compilación PyInstaller y coincidencia del archivo SHA-256: correctas.
+- Entrega: `release_1.88.20/TERAsoft.exe` (87,092,466 bytes) y `SHA256.txt`.
+- SHA-256: `892E4D7AB1064E99379145ED1EE4B64FC49D37D7172A3F780BE203BF99C23F92`.
+- Commit resultante: pendiente de crear.
+- Publicado o respaldado: pendiente de publicación en `integracion`.
+- Procedimiento de rollback: revertir el commit resultante o restaurar `75446e3`.
+
 ### CHG-20261113-1412 — Mantener visibles los controles de edición de pasos
 
 - Fecha y hora de inicio: 2026-11-13 14:12:21 (America/Mexico_City).
@@ -39,8 +73,8 @@ Esta bitácora registra el estado base del proyecto y todos los cambios que se r
   - Compilación PyInstaller y coincidencia del archivo SHA-256: correctas.
 - Entrega: `release_1.88.19/TERAsoft.exe` (87,091,149 bytes) y `SHA256.txt`.
 - SHA-256: `D74EDC3B3488139037EF48EEB3338C617AF78F059DD585303B43A70D6A9F460A`.
-- Commit resultante: pendiente de crear.
-- Publicado o respaldado: pendiente de publicación en `integracion`.
+- Commit funcional resultante: `75446e3` (`fix: mostrar controles de edicion de secuencias`).
+- Publicado o respaldado: Sí; cambio funcional publicado en la rama `integracion` de GitHub.
 - Procedimiento de rollback: revertir el commit resultante o restaurar `74a5de2`.
 
 ### CHG-20261113-1334 — Controles visibles y captura independiente en Secuencias

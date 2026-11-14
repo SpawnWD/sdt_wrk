@@ -98,8 +98,15 @@ class ProfessionalPhoneController:
     def __init__(self, root):
         self.root = root
         self.root.title("TERAsoft (移动设备管理)")
-        self.root.geometry("1320x900")
-        self.root.minsize(1100, 720)
+        screen_width = max(640, self.root.winfo_screenwidth())
+        screen_height = max(480, self.root.winfo_screenheight())
+        window_width = min(1320, max(760, screen_width - 32))
+        window_height = min(900, max(560, screen_height - 80))
+        self.compact_layout = window_width < 1180 or window_height < 760
+        position_x = max(0, (screen_width - window_width) // 2)
+        position_y = max(0, (screen_height - window_height) // 3)
+        self.root.geometry(f"{window_width}x{window_height}+{position_x}+{position_y}")
+        self.root.minsize(min(900, window_width), min(620, window_height))
         self.root.configure(bg="#eef2f7")
         self.configure_application_icon()
 
@@ -190,15 +197,17 @@ class ProfessionalPhoneController:
         self.create_console_widget()
 
         self.workspace = tk.Frame(self.root, bg="#eef2f7")
-        self.workspace.pack(fill="both", expand=True, padx=12, pady=(0, 8))
-        self.sidebar = tk.Frame(self.workspace, bg="#17233a", width=228)
+        workspace_padding = 7 if self.compact_layout else 12
+        self.workspace.pack(fill="both", expand=True, padx=workspace_padding, pady=(0, 6))
+        self.sidebar = tk.Frame(self.workspace, bg="#17233a", width=190 if self.compact_layout else 228)
         self.sidebar.pack(side="left", fill="y")
         self.sidebar.pack_propagate(False)
         self.content_panel = tk.Frame(self.workspace, bg="#f7f9fc", highlightthickness=1, highlightbackground="#d8e0ec")
         self.content_panel.pack(side="left", fill="both", expand=True)
 
         self.notebook = ttk.Notebook(self.content_panel, style="Sidebar.TNotebook")
-        self.notebook.pack(fill="both", expand=True, padx=12, pady=12)
+        content_padding = 7 if self.compact_layout else 12
+        self.notebook.pack(fill="both", expand=True, padx=content_padding, pady=content_padding)
 
         self.tab_general = ttk.Frame(self.notebook)
         self.tab_interaction = ttk.Frame(self.notebook)
@@ -266,21 +275,21 @@ class ProfessionalPhoneController:
             self.app_icon = None
 
     def create_application_header(self):
-        header = tk.Frame(self.root, bg="#0f5fb8", height=78)
+        header = tk.Frame(self.root, bg="#0f5fb8", height=68 if self.compact_layout else 78)
         header.pack(fill="x")
         header.pack_propagate(False)
 
         title_box = tk.Frame(header, bg="#0f5fb8")
-        title_box.pack(side="left", fill="y", padx=20)
+        title_box.pack(side="left", fill="y", padx=12 if self.compact_layout else 20)
         tk.Label(title_box, text="TERAsoft (移动设备管理)", bg="#0f5fb8", fg="white",
-                 font=("Microsoft YaHei UI", 15, "bold")).pack(anchor="w", pady=(11, 0))
+                 font=("Microsoft YaHei UI", 13 if self.compact_layout else 15, "bold")).pack(anchor="w", pady=(8 if self.compact_layout else 11, 0))
         self.current_page_var = tk.StringVar(value="Dispositivos")
         tk.Label(title_box, textvariable=self.current_page_var, bg="#0f5fb8", fg="#cfe5ff",
                  font=("Segoe UI", 9)).pack(anchor="w")
 
         self.header_device_var = tk.StringVar(value="0 conectados  ·  0 seleccionados")
         status = tk.Frame(header, bg="#0b4f9b", padx=14, pady=8)
-        status.pack(side="right", padx=20, pady=10)
+        status.pack(side="right", padx=10 if self.compact_layout else 20, pady=7 if self.compact_layout else 10)
         tk.Label(status, text="ESTADO DE DISPOSITIVOS", bg="#0b4f9b", fg="#a9cff9",
                  font=("Segoe UI", 8, "bold")).pack(anchor="e")
         tk.Label(status, textvariable=self.header_device_var, bg="#0b4f9b", fg="white",
@@ -300,11 +309,14 @@ class ProfessionalPhoneController:
 
     def create_sidebar_navigation(self):
         self.navigation_buttons = {}
+        heading_top = 8 if self.compact_layout else 18
+        group_top = 5 if self.compact_layout else 12
+        button_padding_y = 4 if self.compact_layout else 9
         tk.Label(self.sidebar, text="NAVEGACIÓN", bg="#17233a", fg="#91a4c3",
-                 font=("Segoe UI", 8, "bold")).pack(anchor="w", padx=18, pady=(18, 8))
+                 font=("Segoe UI", 8, "bold")).pack(anchor="w", padx=14 if self.compact_layout else 18, pady=(heading_top, 4 if self.compact_layout else 8))
         for group, pages in self.navigation_pages:
             tk.Label(self.sidebar, text=group, bg="#17233a", fg="#7186a9",
-                     font=("Segoe UI", 8, "bold")).pack(anchor="w", padx=18, pady=(12, 4))
+                     font=("Segoe UI", 8, "bold")).pack(anchor="w", padx=14 if self.compact_layout else 18, pady=(group_top, 2 if self.compact_layout else 4))
             for label, tab in pages:
                 button = tk.Button(
                     self.sidebar,
@@ -317,8 +329,8 @@ class ProfessionalPhoneController:
                     relief="flat",
                     bd=0,
                     anchor="w",
-                    padx=18,
-                    pady=9,
+                    padx=14 if self.compact_layout else 18,
+                    pady=button_padding_y,
                     font=("Segoe UI", 9, "bold"),
                     cursor="hand2",
                 )
@@ -327,7 +339,7 @@ class ProfessionalPhoneController:
 
         footer = tk.Label(self.sidebar, text="Multi-dispositivo", bg="#17233a", fg="#7186a9",
                           font=("Segoe UI", 8))
-        footer.pack(side="bottom", anchor="w", padx=18, pady=16)
+        footer.pack(side="bottom", anchor="w", padx=14 if self.compact_layout else 18, pady=6 if self.compact_layout else 16)
 
     def select_navigation_page(self, tab, label):
         self.notebook.select(tab)
@@ -380,28 +392,46 @@ class ProfessionalPhoneController:
             messagebox.showerror("Error", f"No se pudo guardar alias: {e}")
 
     def create_general_widgets(self):
-        dev_frame = ttk.LabelFrame(self.tab_general, text=" Gestión de Dispositivos Conectados ", padding=10)
-        dev_frame.pack(fill="x", padx=10, pady=10)
+        dev_frame = ttk.LabelFrame(
+            self.tab_general,
+            text=" Gestión de Dispositivos Conectados ",
+            padding=6 if self.compact_layout else 10,
+        )
+        dev_frame.pack(
+            fill="x",
+            padx=6 if self.compact_layout else 10,
+            pady=6 if self.compact_layout else 10,
+        )
 
-        toolbar = ttk.Frame(dev_frame)
-        toolbar.pack(fill="x", pady=(0, 7))
+        device_actions = ttk.Frame(dev_frame)
+        device_actions.pack(fill="x", pady=(0, 7))
+        selection_row = ttk.Frame(device_actions)
+        selection_row.pack(fill="x", pady=(0, 5))
+        ttk.Button(selection_row, text="Escanear Dispositivos", command=self.refresh_devices_async, style="Success.TButton").pack(side="left")
+        ttk.Button(selection_row, text="Seleccionar todos", command=self.select_all_devices).pack(side="left", padx=(7, 0))
+        ttk.Button(selection_row, text="Ninguno", command=self.clear_device_selection).pack(side="left", padx=(7, 0))
+        ttk.Button(selection_row, text="Asignar nombre", command=self.rename_selected_device).pack(side="left", padx=(7, 0))
 
-        ttk.Button(toolbar, text="Escanear Dispositivos", command=self.refresh_devices_async, style="Success.TButton").pack(side="left")
-        ttk.Button(toolbar, text="Seleccionar todos", command=self.select_all_devices).pack(side="left", padx=(7, 0))
-        ttk.Button(toolbar, text="Ninguno", command=self.clear_device_selection).pack(side="left", padx=(7, 0))
-        ttk.Button(toolbar, text="Asignar nombre", command=self.rename_selected_device).pack(side="left", padx=(7, 0))
-        ttk.Button(toolbar, text="Ver en Pantalla", command=self.open_selected_screens, style="Primary.TButton").pack(side="left", padx=(18, 0))
-        ttk.Button(toolbar, text="Ver todos", command=self.open_all_screens).pack(side="left", padx=(7, 0))
-        ttk.Button(toolbar, text="Cerrar pantallas", command=self.close_selected_screens).pack(side="left", padx=(7, 0))
-        ttk.Button(toolbar, text="Cerrar todas", command=self.close_all_screens).pack(side="left", padx=(7, 0))
+        screen_row = ttk.Frame(device_actions)
+        screen_row.pack(fill="x")
+        ttk.Button(screen_row, text="Ver en Pantalla", command=self.open_selected_screens, style="Primary.TButton").pack(side="left")
+        ttk.Button(screen_row, text="Ver todos", command=self.open_all_screens).pack(side="left", padx=(7, 0))
+        ttk.Button(screen_row, text="Cerrar pantallas", command=self.close_selected_screens).pack(side="left", padx=(7, 0))
+        ttk.Button(screen_row, text="Cerrar todas", command=self.close_all_screens).pack(side="left", padx=(7, 0))
 
-        self.lbl_devices = ttk.Label(toolbar, text="Dispositivos detectados: 0", font=("Segoe UI", 9, "bold"))
+        self.lbl_devices = ttk.Label(screen_row, text="Dispositivos detectados: 0", font=("Segoe UI", 9, "bold"))
         self.lbl_devices.pack(side="right", padx=5)
 
         table_frame = ttk.Frame(dev_frame)
         table_frame.pack(fill="x")
         columns = ("nombre", "modelo", "serial", "android", "estado", "tarea")
-        self.device_table = ttk.Treeview(table_frame, columns=columns, show="headings", selectmode="extended", height=4)
+        self.device_table = ttk.Treeview(
+            table_frame,
+            columns=columns,
+            show="headings",
+            selectmode="extended",
+            height=3 if self.compact_layout else 4,
+        )
         headings = {"nombre": "Nombre", "modelo": "Modelo", "serial": "Serie", "android": "Android", "estado": "Estado", "tarea": "Tarea actual"}
         widths = {"nombre": 140, "modelo": 135, "serial": 135, "android": 70, "estado": 95, "tarea": 180}
         for col in columns:
@@ -417,22 +447,44 @@ class ProfessionalPhoneController:
         self.lbl_selection = ttk.Label(dev_frame, text="Seleccionados: 0", foreground="#1d5f91", font=("Segoe UI", 9, "bold"))
         self.lbl_selection.pack(anchor="w", pady=(6, 0))
 
-        act_frame = ttk.LabelFrame(self.tab_general, text=" Tareas Básicas de Sistema ", padding=10)
-        act_frame.pack(fill="x", padx=10, pady=5)
+        act_frame = ttk.LabelFrame(
+            self.tab_general,
+            text=" Tareas Básicas de Sistema ",
+            padding=6 if self.compact_layout else 10,
+        )
+        act_frame.pack(fill="x", padx=6 if self.compact_layout else 10, pady=4 if self.compact_layout else 5)
 
         ttk.Button(act_frame, text="Abrir Facebook en seleccionados", command=self.open_facebook_all, style="Primary.TButton").pack(anchor="w", padx=5, pady=5)
         
-        ttk.Label(act_frame, text="Inyectar texto directo:", font=("Segoe UI", 9)).pack(anchor="w", padx=5, pady=(10, 2))
-        self.text_post_general = scrolledtext.ScrolledText(act_frame, width=80, height=3, font=("Segoe UI", 10))
+        text_action_row = ttk.Frame(act_frame)
+        text_action_row.pack(fill="x", padx=5, pady=(8, 2))
+        ttk.Label(text_action_row, text="Inyectar texto directo:", font=("Segoe UI", 9)).pack(side="left")
+        ttk.Button(
+            text_action_row,
+            text="Inyectar Texto Simple",
+            command=lambda: self.execute_multithreaded(
+                lambda dev: self.inject_text_adb(dev, self.text_post_general.get("1.0", tk.END).strip()),
+                "Inyectando Texto",
+            ),
+        ).pack(side="right")
+        self.text_post_general = scrolledtext.ScrolledText(
+            act_frame,
+            width=80,
+            height=1 if self.compact_layout else 3,
+            font=("Segoe UI", 10),
+        )
         self.text_post_general.pack(fill="x", padx=5, pady=2)
-        ttk.Button(act_frame, text="Inyectar Texto Simple", command=lambda: self.execute_multithreaded(lambda dev: self.inject_text_adb(dev, self.text_post_general.get("1.0", tk.END).strip()), "Inyectando Texto")).pack(anchor="w", padx=5, pady=5)
 
     def create_interaction_widgets(self):
         info_lbl = ttk.Label(self.tab_interaction, text="Accesibilidad + clic calculado por figura para localizar Me gusta y Comentario.", font=("Segoe UI", 9, "italic", "bold"), foreground="#1877f2")
-        info_lbl.pack(anchor="w", padx=15, pady=(15, 5))
+        info_lbl.pack(anchor="w", padx=8 if self.compact_layout else 15, pady=(8 if self.compact_layout else 15, 5))
 
-        int_frame = ttk.LabelFrame(self.tab_interaction, text=" Configuración de la Acción ", padding=15)
-        int_frame.pack(fill="x", padx=15, pady=5)
+        int_frame = ttk.LabelFrame(
+            self.tab_interaction,
+            text=" Configuración de la Acción ",
+            padding=8 if self.compact_layout else 15,
+        )
+        int_frame.pack(fill="x", padx=8 if self.compact_layout else 15, pady=4 if self.compact_layout else 5)
 
         ttk.Label(int_frame, text="URL de la publicación (Post, Foto, Video):", font=("Segoe UI", 9, "bold")).pack(anchor="w", pady=2)
         self.entry_int_url = ttk.Entry(int_frame, font=("Segoe UI", 10))
@@ -472,11 +524,53 @@ class ProfessionalPhoneController:
         ).pack(side="left")
 
         ttk.Label(int_frame, text="Texto del Comentario (Usa Spintax: {Hola|Qué tal}):", font=("Segoe UI", 9)).pack(anchor="w", pady=(10, 2))
-        self.text_int_comment = scrolledtext.ScrolledText(int_frame, height=4, font=("Segoe UI", 10))
+        self.text_int_comment = scrolledtext.ScrolledText(
+            int_frame,
+            height=2 if self.compact_layout else 4,
+            font=("Segoe UI", 10),
+        )
         self.text_int_comment.pack(fill="x", pady=(0, 10))
 
-        sec_frame = ttk.LabelFrame(self.tab_interaction, text=" Parámetros de Tiempos ", padding=10)
-        sec_frame.pack(fill="x", padx=15, pady=5)
+        btn_row = ttk.Frame(self.tab_interaction)
+        btn_row.pack(fill="x", padx=8 if self.compact_layout else 15, pady=6 if self.compact_layout else 10)
+
+        interaction_options = ttk.Frame(btn_row)
+        interaction_options.pack(fill="x", pady=(0, 4))
+        self.int_do_like_var = tk.BooleanVar(value=True)
+        ttk.Checkbutton(
+            interaction_options, text="👍 Me gusta", variable=self.int_do_like_var
+        ).pack(side="left", padx=(0, 10))
+        self.int_do_comment_var = tk.BooleanVar(value=True)
+        ttk.Checkbutton(
+            interaction_options, text="💬 Comentario", variable=self.int_do_comment_var
+        ).pack(side="left", padx=(0, 14))
+
+        interaction_controls = ttk.Frame(btn_row)
+        interaction_controls.pack(fill="x")
+        self.btn_start_selected = ttk.Button(
+            interaction_controls,
+            text="▶ Ejecutar acciones seleccionadas",
+            command=self.start_selected_interactions,
+            style="Success.TButton",
+        )
+        self.btn_start_selected.pack(side="left", ipadx=8, ipady=4)
+        self.btn_stop_interaction = ttk.Button(
+            interaction_controls,
+            text="⏹ Detener proceso",
+            command=self.stop_interaction_process,
+            style="Warning.TButton",
+            state="disabled",
+        )
+        self.btn_stop_interaction.pack(side="left", padx=(7, 0), ipadx=8, ipady=4)
+        self.interaction_status_var = tk.StringVar(value="Listo")
+        ttk.Label(interaction_controls, textvariable=self.interaction_status_var).pack(side="right", padx=8)
+
+        sec_frame = ttk.LabelFrame(
+            self.tab_interaction,
+            text=" Parámetros de Tiempos ",
+            padding=6 if self.compact_layout else 10,
+        )
+        sec_frame.pack(fill="x", padx=8 if self.compact_layout else 15, pady=4 if self.compact_layout else 5)
 
         row2 = ttk.Frame(sec_frame)
         row2.pack(fill="x", pady=4)
@@ -487,35 +581,6 @@ class ProfessionalPhoneController:
         self.int_load_max = tk.StringVar(value="10.0")
         ttk.Spinbox(row2, from_=4.0, to=30.0, increment=1.0, width=4, textvariable=self.int_load_max).pack(side="left", padx=4)
         ttk.Label(row2, text="segundos").pack(side="left")
-
-        btn_row = ttk.Frame(self.tab_interaction)
-        btn_row.pack(fill="x", padx=15, pady=15)
-
-        self.int_do_like_var = tk.BooleanVar(value=True)
-        ttk.Checkbutton(
-            btn_row, text="👍 Me gusta", variable=self.int_do_like_var
-        ).pack(side="left", padx=(0, 10))
-        self.int_do_comment_var = tk.BooleanVar(value=True)
-        ttk.Checkbutton(
-            btn_row, text="💬 Comentario", variable=self.int_do_comment_var
-        ).pack(side="left", padx=(0, 14))
-        self.btn_start_selected = ttk.Button(
-            btn_row,
-            text="▶ Ejecutar acciones seleccionadas",
-            command=self.start_selected_interactions,
-            style="Success.TButton",
-        )
-        self.btn_start_selected.pack(side="left", ipadx=8, ipady=4)
-        self.btn_stop_interaction = ttk.Button(
-            btn_row,
-            text="⏹ Detener proceso",
-            command=self.stop_interaction_process,
-            style="Warning.TButton",
-            state="disabled",
-        )
-        self.btn_stop_interaction.pack(side="left", ipadx=8, ipady=4)
-        self.interaction_status_var = tk.StringVar(value="Listo")
-        ttk.Label(btn_row, textvariable=self.interaction_status_var).pack(side="right", padx=8)
 
     def create_human_widgets(self):
         human_frame = ttk.LabelFrame(self.tab_human, text=" 🛡️ Configuración de Calentamiento y Comportamiento Humano ", padding=15)
@@ -811,17 +876,22 @@ class ProfessionalPhoneController:
         sequence_frame = ttk.LabelFrame(
             self.tab_sequence,
             text=" Constructor visual de procedimientos ",
-            padding=10,
+            padding=6 if self.compact_layout else 10,
         )
-        sequence_frame.pack(fill="both", expand=True, padx=10, pady=10)
-        ttk.Label(
-            sequence_frame,
-            text=(
-                "Selecciona un teléfono, captura su pantalla y pulsa sobre la imagen para registrar un toque. "
-                "La ejecución siempre puede detenerse."
-            ),
-            foreground="#1d5f91",
-        ).pack(fill="x", pady=(0, 7))
+        sequence_frame.pack(
+            fill="both", expand=True,
+            padx=6 if self.compact_layout else 10,
+            pady=6 if self.compact_layout else 10,
+        )
+        if not self.compact_layout:
+            ttk.Label(
+                sequence_frame,
+                text=(
+                    "Selecciona un teléfono, captura su pantalla y pulsa sobre la imagen para registrar un toque. "
+                    "La ejecución siempre puede detenerse."
+                ),
+                foreground="#1d5f91",
+            ).pack(fill="x", pady=(0, 7))
 
         toolbar = ttk.Frame(sequence_frame)
         toolbar.pack(fill="x", pady=(0, 7))
@@ -833,7 +903,11 @@ class ProfessionalPhoneController:
         ttk.Button(toolbar, text="Guardar", command=self.save_sequence_file).pack(side="right", padx=(7, 0))
         ttk.Button(toolbar, text="Cargar", command=self.load_sequence_file).pack(side="right")
 
-        action_builder = ttk.LabelFrame(sequence_frame, text=" Agregar una acción al proceso ", padding=7)
+        action_builder = ttk.LabelFrame(
+            sequence_frame,
+            text=" Agregar una acción al proceso ",
+            padding=5 if self.compact_layout else 7,
+        )
         action_builder.pack(fill="x", pady=(0, 7))
         selector_row = ttk.Frame(action_builder)
         selector_row.pack(fill="x")
@@ -854,11 +928,12 @@ class ProfessionalPhoneController:
             command=self.add_configured_sequence_action,
             style="Primary.TButton",
         ).pack(side="left")
-        ttk.Label(
-            selector_row,
-            text="Los valores iniciales reutilizan los tiempos ya establecidos en el panel.",
-            foreground="#1d5f91",
-        ).pack(side="left", padx=(12, 0))
+        if not self.compact_layout:
+            ttk.Label(
+                selector_row,
+                text="Los valores iniciales reutilizan los tiempos ya establecidos en el panel.",
+                foreground="#1d5f91",
+            ).pack(side="left", padx=(12, 0))
         self.sequence_action_fields = ttk.Frame(action_builder)
         self.sequence_action_fields.pack(fill="x", pady=(6, 0))
         self.render_sequence_action_fields()
@@ -889,19 +964,19 @@ class ProfessionalPhoneController:
         self.btn_sequence_stop.pack(side="left", padx=(7, 0))
         self.sequence_status_var = tk.StringVar(value="Secuencia lista. No hay pasos registrados.")
         ttk.Label(
-            execution_row,
+            sequence_frame,
             textvariable=self.sequence_status_var,
             foreground="#1d5f91",
             font=("Segoe UI", 9, "bold"),
-        ).pack(side="left", fill="x", expand=True, padx=(12, 0))
+        ).pack(fill="x", pady=(0, 7))
 
         steps_frame = ttk.LabelFrame(sequence_frame, text=" Pasos registrados ", padding=5)
         steps_frame.pack(fill="both", expand=True)
 
+        ttk.Label(steps_frame, text="Editar paso seleccionado:", font=("Segoe UI", 9, "bold")).pack(anchor="w")
         edit_row = ttk.Frame(steps_frame)
-        edit_row.pack(fill="x", pady=(0, 6))
-        ttk.Label(edit_row, text="Editar paso seleccionado:", font=("Segoe UI", 9, "bold")).pack(side="left")
-        ttk.Button(edit_row, text="Subir", command=lambda: self.move_sequence_step(-1)).pack(side="left", padx=(8, 0))
+        edit_row.pack(fill="x", pady=(3, 6))
+        ttk.Button(edit_row, text="Subir", command=lambda: self.move_sequence_step(-1)).pack(side="left")
         ttk.Button(edit_row, text="Bajar", command=lambda: self.move_sequence_step(1)).pack(side="left", padx=(5, 0))
         ttk.Button(edit_row, text="Eliminar", command=self.delete_sequence_step).pack(side="left", padx=(5, 0))
         ttk.Button(edit_row, text="Limpiar", command=self.clear_sequence_steps).pack(side="right")
@@ -1046,7 +1121,7 @@ class ProfessionalPhoneController:
             ttk.Entry(row, textvariable=self.sequence_action_max_var, width=7).pack(side="left")
             ttk.Label(row, text="segundos").pack(side="left", padx=(4, 0))
             self.sequence_action_text_widget = scrolledtext.ScrolledText(
-                self.sequence_action_fields, height=2, font=("Segoe UI", 9)
+                self.sequence_action_fields, height=1 if self.compact_layout else 2, font=("Segoe UI", 9)
             )
             self.sequence_action_text_widget.pack(fill="x", pady=(5, 0))
             return
@@ -1057,7 +1132,7 @@ class ProfessionalPhoneController:
                 text="Pega la lista: cada renglón será un elemento independiente del proceso.",
             ).pack(anchor="w")
             self.sequence_action_list_widget = scrolledtext.ScrolledText(
-                self.sequence_action_fields, height=3, font=("Segoe UI", 9)
+                self.sequence_action_fields, height=2 if self.compact_layout else 3, font=("Segoe UI", 9)
             )
             self.sequence_action_list_widget.pack(fill="x", pady=(4, 0))
             return
@@ -2328,15 +2403,16 @@ class ProfessionalPhoneController:
         console_header.pack(fill="x")
         tk.Label(console_header, text="Registro de actividad", bg="#17233a", fg="white",
                  font=("Segoe UI", 9, "bold")).pack(side="left", padx=12, pady=7)
-        self.console_visible = True
+        self.console_visible = not self.compact_layout
         self.console_toggle_button = tk.Button(
-            console_header, text="Ocultar", command=self.toggle_console,
+            console_header, text="Ocultar" if self.console_visible else "Mostrar", command=self.toggle_console,
             bg="#17233a", fg="#bcd0ea", activebackground="#23426d", activeforeground="white",
             relief="flat", bd=0, font=("Segoe UI", 8, "bold"), cursor="hand2"
         )
         self.console_toggle_button.pack(side="right", padx=10)
         self.console_body = tk.Frame(self.console_frame, bg="#101827")
-        self.console_body.pack(fill="x")
+        if self.console_visible:
+            self.console_body.pack(fill="x")
         self.console = scrolledtext.ScrolledText(
             self.console_body, bg="#101827", fg="#8ee6a8", font=("Consolas", 9),
             insertbackground="white", height=5, relief="flat", bd=0
