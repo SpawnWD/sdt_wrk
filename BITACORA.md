@@ -51,8 +51,8 @@ Esta bitácora registra el estado base del proyecto y todos los cambios que se r
   - Compilación PyInstaller y coincidencia del archivo SHA-256: correctas.
 - Entrega: `release_1.88.20/TERAsoft.exe` (87,092,466 bytes) y `SHA256.txt`.
 - SHA-256: `892E4D7AB1064E99379145ED1EE4B64FC49D37D7172A3F780BE203BF99C23F92`.
-- Commit resultante: pendiente de crear.
-- Publicado o respaldado: pendiente de publicación en `integracion`.
+- Commit funcional resultante: `99a2a27` (`feat: adaptar interfaz a resoluciones pequenas`).
+- Publicado o respaldado: Sí; cambio funcional publicado en la rama `integracion` de GitHub.
 - Procedimiento de rollback: revertir el commit resultante o restaurar `75446e3`.
 
 ### CHG-20261113-1412 — Mantener visibles los controles de edición de pasos
