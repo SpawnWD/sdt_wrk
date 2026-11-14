@@ -117,6 +117,7 @@ VERSION EJECUTABLE Y LICENCIA
 ORGANIZACIÓN DE LA INTERFAZ
 - El nombre visible es `TERAsoft (移动设备管理)` y el pie inferior derecho muestra `版本 1.88`.
 - En `Secuencias`, los botones de ejecución y detención permanecen encima de la lista de pasos para seguir visibles cuando el registro de actividad reduce la altura disponible. La captura interactiva del teléfono se abre en una ventana independiente mediante `Abrir/capturar teléfono seleccionado`, donde también puede actualizarse sin ocupar el panel principal.
+- Los controles `Subir`, `Bajar`, `Eliminar` y `Limpiar` aparecen encima de la tabla de pasos para mantenerse accesibles aun cuando la altura de la ventana sea reducida.
 - La ventana y el ejecutable utilizan el icono del teléfono con sombrero cónico incluido en `assets`.
 - El encabezado muestra la sección actual y el número de teléfonos conectados y seleccionados.
 - La navegación lateral agrupa las nueve secciones en Operación, Automatización y Herramientas; el botón azul indica la vista activa.

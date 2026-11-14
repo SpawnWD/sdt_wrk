@@ -21,6 +21,28 @@ Esta bitácora registra el estado base del proyecto y todos los cambios que se r
 
 ## Cambios completados
 
+### CHG-20261113-1412 — Mantener visibles los controles de edición de pasos
+
+- Fecha y hora de inicio: 2026-11-13 14:12:21 (America/Mexico_City).
+- Estado: Completado y validado visualmente el 2026-11-13 14:13 (America/Mexico_City).
+- Tipo: Corrección de interfaz / Distribución adaptable.
+- Solicitud: Mostrar los botones `Subir`, `Bajar`, `Eliminar` y `Limpiar` en la pantalla `Secuencias`.
+- Diagnóstico inicial: la fila de edición está colocada después de la tabla expandible; al ocupar ésta toda la altura disponible, los controles quedan fuera del área visible.
+- Cambio previsto: colocar la fila de edición antes de la tabla para mantenerla visible con cualquier altura disponible.
+- Riesgos controlados: conservar la selección actual, el orden de pasos, la confirmación para limpiar y todos los comandos existentes.
+- Referencia de rollback: commit `74a5de2` de la rama `integracion`.
+- Archivos previstos: `panel.py`, `Construir Ejecutable.ps1`, `LEEME.txt` y `BITACORA.md`.
+- Implementación: la fila `Editar paso seleccionado` ahora aparece antes de la tabla con los botones `Subir`, `Bajar`, `Eliminar` y `Limpiar`.
+- Pruebas realizadas:
+  - `python -m py_compile panel.py license_guard.py` y `git diff --check`: correctos.
+  - Validación visual con el registro de actividad abierto: los cuatro controles y los botones de ejecución aparecen simultáneamente.
+  - Compilación PyInstaller y coincidencia del archivo SHA-256: correctas.
+- Entrega: `release_1.88.19/TERAsoft.exe` (87,091,149 bytes) y `SHA256.txt`.
+- SHA-256: `D74EDC3B3488139037EF48EEB3338C617AF78F059DD585303B43A70D6A9F460A`.
+- Commit resultante: pendiente de crear.
+- Publicado o respaldado: pendiente de publicación en `integracion`.
+- Procedimiento de rollback: revertir el commit resultante o restaurar `74a5de2`.
+
 ### CHG-20261113-1334 — Controles visibles y captura independiente en Secuencias
 
 - Fecha y hora de inicio: 2026-11-13 13:34:30 (America/Mexico_City)

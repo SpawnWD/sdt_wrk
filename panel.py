@@ -898,6 +898,14 @@ class ProfessionalPhoneController:
         steps_frame = ttk.LabelFrame(sequence_frame, text=" Pasos registrados ", padding=5)
         steps_frame.pack(fill="both", expand=True)
 
+        edit_row = ttk.Frame(steps_frame)
+        edit_row.pack(fill="x", pady=(0, 6))
+        ttk.Label(edit_row, text="Editar paso seleccionado:", font=("Segoe UI", 9, "bold")).pack(side="left")
+        ttk.Button(edit_row, text="Subir", command=lambda: self.move_sequence_step(-1)).pack(side="left", padx=(8, 0))
+        ttk.Button(edit_row, text="Bajar", command=lambda: self.move_sequence_step(1)).pack(side="left", padx=(5, 0))
+        ttk.Button(edit_row, text="Eliminar", command=self.delete_sequence_step).pack(side="left", padx=(5, 0))
+        ttk.Button(edit_row, text="Limpiar", command=self.clear_sequence_steps).pack(side="right")
+
         self.sequence_tree = ttk.Treeview(
             steps_frame,
             columns=("step", "type", "detail"),
@@ -912,13 +920,6 @@ class ProfessionalPhoneController:
         self.sequence_tree.column("type", width=85, anchor="w", stretch=False)
         self.sequence_tree.column("detail", width=220, anchor="w")
         self.sequence_tree.pack(fill="both", expand=True)
-
-        edit_row = ttk.Frame(steps_frame)
-        edit_row.pack(fill="x", pady=(6, 0))
-        ttk.Button(edit_row, text="Subir", command=lambda: self.move_sequence_step(-1)).pack(side="left")
-        ttk.Button(edit_row, text="Bajar", command=lambda: self.move_sequence_step(1)).pack(side="left", padx=(5, 0))
-        ttk.Button(edit_row, text="Eliminar", command=self.delete_sequence_step).pack(side="left", padx=(5, 0))
-        ttk.Button(edit_row, text="Limpiar", command=self.clear_sequence_steps).pack(side="right")
 
     def render_sequence_action_fields(self):
         if not hasattr(self, "sequence_action_fields"):
