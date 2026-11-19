@@ -52,8 +52,8 @@ Esta bitácora registra el estado base del proyecto y todos los cambios que se r
   - Compilación PyInstaller, coincidencia SHA-256 y arranque real de `TERAsoft.exe` respondiendo: correctos.
 - Entrega: `release_1.88.21/TERAsoft.exe` (87,096,777 bytes) y `SHA256.txt`.
 - SHA-256: `AB3DC4D6BEEFCEB84A9FF01AC058C3B67A8640F4DD63218643C11F0C57F080D3`.
-- Commit resultante: pendiente de crear.
-- Publicado o respaldado: pendiente de publicación en `integracion`.
+- Commit funcional resultante: `0fa559b` (`feat: ejecutar multiples secuencias guardadas`).
+- Publicado o respaldado: Sí; cambio funcional publicado en la rama `integracion` de GitHub.
 - Procedimiento de rollback: revertir el commit resultante o restaurar `d7a41ab`.
 
 ## Cambios completados
