@@ -21,6 +21,43 @@ Esta bitácora registra el estado base del proyecto y todos los cambios que se r
 
 ## Cambios completados
 
+### CHG-20261119-0259 — Biblioteca de secuencias múltiples y pestañas desplazables
+
+- Fecha y hora de inicio: 2026-11-19 02:59:44 (America/Mexico_City).
+- Estado: Completado y validado el 2026-11-19 03:05:53 (America/Mexico_City).
+- Tipo: Funcionalidad / Interfaz adaptable.
+- Solicitud:
+  - Mostrar las secuencias guardadas como una lista de casillas seleccionables.
+  - Permitir activar varias y ejecutarlas consecutivamente en los teléfonos seleccionados.
+  - Hacer que cada pestaña adapte su contenido al espacio real para que ningún botón o elemento quede inaccesible.
+- Alcance previsto:
+  - Biblioteca basada en los JSON compatibles de la carpeta `secuencias`, con actualización, selección múltiple, carga individual al editor y ejecución ordenada.
+  - Ejecución concurrente por teléfono y consecutiva por secuencia dentro de cada teléfono, conservando `Detener`.
+  - Contenedor vertical desplazable para todas las pestañas, ajustado automáticamente al ancho disponible.
+- Riesgos controlados: no alterar el formato versión 1 existente, validar cada archivo antes de habilitarlo, no mezclar listas internas entre teléfonos y conservar los controles de detención/liberación de equipos.
+- Referencia de rollback: commit `d7a41ab` de la rama `integracion`.
+- Archivos previstos: `panel.py`, `Construir Ejecutable.ps1`, `LEEME.txt` y `BITACORA.md`.
+- Implementación:
+  - `Secuencias guardadas` enumera los JSON válidos de la carpeta `secuencias` y muestra una casilla con el nombre exacto de cada archivo y su cantidad de pasos.
+  - Las casillas activas se concatenan en el orden alfabético mostrado; cada teléfono ejecuta la cadena completa y varios teléfonos trabajan simultáneamente.
+  - Cada secuencia reinicia su contexto de lista antes de comenzar, evitando que `Cargar lista por renglones` de un archivo afecte al siguiente.
+  - `Cargar una al editor` exige una sola casilla; `Marcar todas`, `Ninguna` y `Actualizar lista` administran la biblioteca.
+  - Los archivos inválidos se muestran como advertencia y no pueden activarse; se mantiene el formato JSON versión 1 y el límite individual de 500 pasos.
+  - Todas las pestañas se montan dentro de un contenedor desplazable que ajusta su ancho automáticamente y permite acceder verticalmente a cualquier control.
+- Pruebas realizadas:
+  - `python -m py_compile panel.py license_guard.py` y `git diff --check`: correctos.
+  - Prueba visual 1024 × 720 con `01 Inicio.json` y `02 Publicar.json`: nombres exactos, cantidad de pasos y dos casillas activas simultáneamente visibles.
+  - Prueba lógica aislada: `A primera.json` y `B segunda.json` produjeron una cadena ordenada con sus pasos etiquetados por archivo.
+  - Validación del desplazamiento: Secuencias mostró barra vertical y conservó el ancho del contenido sin ocultar acciones.
+  - Compilación PyInstaller, coincidencia SHA-256 y arranque real de `TERAsoft.exe` respondiendo: correctos.
+- Entrega: `release_1.88.21/TERAsoft.exe` (87,096,777 bytes) y `SHA256.txt`.
+- SHA-256: `AB3DC4D6BEEFCEB84A9FF01AC058C3B67A8640F4DD63218643C11F0C57F080D3`.
+- Commit resultante: pendiente de crear.
+- Publicado o respaldado: pendiente de publicación en `integracion`.
+- Procedimiento de rollback: revertir el commit resultante o restaurar `d7a41ab`.
+
+## Cambios completados
+
 ### CHG-20261114-0055 — Interfaz adaptable para resoluciones pequeñas
 
 - Fecha y hora de inicio: 2026-11-14 00:55:03 (America/Mexico_City).

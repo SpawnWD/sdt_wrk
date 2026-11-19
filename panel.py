@@ -154,6 +154,8 @@ class ProfessionalPhoneController:
         self.pending_search_match = None
         self.search_link_recovery = {}
         self.sequence_steps = []
+        self.sequence_library_vars = {}
+        self.sequence_library_files = {}
         self.sequence_capture_size = None
         self.sequence_display_geometry = None
         self.sequence_photo = None
@@ -209,25 +211,16 @@ class ProfessionalPhoneController:
         content_padding = 7 if self.compact_layout else 12
         self.notebook.pack(fill="both", expand=True, padx=content_padding, pady=content_padding)
 
-        self.tab_general = ttk.Frame(self.notebook)
-        self.tab_interaction = ttk.Frame(self.notebook)
-        self.tab_search = ttk.Frame(self.notebook)
-        self.tab_sequence = ttk.Frame(self.notebook)
-        self.tab_vision = ttk.Frame(self.notebook)
-        self.tab_human = ttk.Frame(self.notebook)
-        self.tab_report = ttk.Frame(self.notebook)
-        self.tab_advanced = ttk.Frame(self.notebook)
-        self.tab_maintenance = ttk.Frame(self.notebook)
-
-        self.notebook.add(self.tab_general, text="Dispositivos")
-        self.notebook.add(self.tab_interaction, text="Interacciones")
-        self.notebook.add(self.tab_search, text="Búsqueda")
-        self.notebook.add(self.tab_sequence, text="Secuencias")
-        self.notebook.add(self.tab_vision, text="Reacciones")
-        self.notebook.add(self.tab_human, text="Modo humano")
-        self.notebook.add(self.tab_report, text="Reportes")
-        self.notebook.add(self.tab_advanced, text="Automatización avanzada")
-        self.notebook.add(self.tab_maintenance, text="Mantenimiento")
+        self.tab_pages = {}
+        self.tab_general = self.create_responsive_tab("Dispositivos")
+        self.tab_interaction = self.create_responsive_tab("Interacciones")
+        self.tab_search = self.create_responsive_tab("Búsqueda")
+        self.tab_sequence = self.create_responsive_tab("Secuencias")
+        self.tab_vision = self.create_responsive_tab("Reacciones")
+        self.tab_human = self.create_responsive_tab("Modo humano")
+        self.tab_report = self.create_responsive_tab("Reportes")
+        self.tab_advanced = self.create_responsive_tab("Automatización avanzada")
+        self.tab_maintenance = self.create_responsive_tab("Mantenimiento")
 
         self.navigation_pages = [
             ("OPERACIÓN", [
@@ -257,6 +250,7 @@ class ProfessionalPhoneController:
         self.create_report_widgets()
         self.create_advanced_widgets()
         self.create_maintenance_widgets()
+        self.refresh_sequence_library()
         self.select_navigation_page(self.tab_general, "Dispositivos")
 
         self.refresh_devices_async()
@@ -341,8 +335,37 @@ class ProfessionalPhoneController:
                           font=("Segoe UI", 8))
         footer.pack(side="bottom", anchor="w", padx=14 if self.compact_layout else 18, pady=6 if self.compact_layout else 16)
 
+    def create_responsive_tab(self, title):
+        """Crea una pestaña cuyo contenido siempre puede desplazarse verticalmente."""
+        page = ttk.Frame(self.notebook)
+        self.notebook.add(page, text=title)
+        canvas = tk.Canvas(page, bg="#f7f9fc", highlightthickness=0, bd=0)
+        scrollbar = ttk.Scrollbar(page, orient="vertical", command=canvas.yview)
+        content = ttk.Frame(canvas)
+        window_id = canvas.create_window((0, 0), window=content, anchor="nw")
+        canvas.configure(yscrollcommand=scrollbar.set)
+        canvas.pack(side="left", fill="both", expand=True)
+        scrollbar.pack(side="right", fill="y")
+
+        def update_scroll_region(_event=None):
+            canvas.configure(scrollregion=canvas.bbox("all"))
+
+        def fit_content_width(event):
+            canvas.itemconfigure(window_id, width=max(1, event.width))
+
+        def wheel(event):
+            if event.delta:
+                canvas.yview_scroll(-1 if event.delta > 0 else 1, "units")
+
+        content.bind("<Configure>", update_scroll_region)
+        canvas.bind("<Configure>", fit_content_width)
+        canvas.bind("<Enter>", lambda _event: canvas.bind_all("<MouseWheel>", wheel))
+        canvas.bind("<Leave>", lambda _event: canvas.unbind_all("<MouseWheel>"))
+        self.tab_pages[str(content)] = page
+        return content
+
     def select_navigation_page(self, tab, label):
-        self.notebook.select(tab)
+        self.notebook.select(self.tab_pages.get(str(tab), tab))
         self.current_page_var.set(label)
         selected_key = str(tab)
         for key, button in self.navigation_buttons.items():
@@ -902,6 +925,68 @@ class ProfessionalPhoneController:
         ).pack(side="left")
         ttk.Button(toolbar, text="Guardar", command=self.save_sequence_file).pack(side="right", padx=(7, 0))
         ttk.Button(toolbar, text="Cargar", command=self.load_sequence_file).pack(side="right")
+
+        library_frame = ttk.LabelFrame(sequence_frame, text=" Secuencias guardadas ", padding=5)
+        library_frame.pack(fill="x", pady=(0, 7))
+        library_controls = ttk.Frame(library_frame)
+        library_controls.pack(fill="x", pady=(0, 4))
+        ttk.Button(library_controls, text="Actualizar lista", command=self.refresh_sequence_library).pack(side="left")
+        ttk.Button(
+            library_controls,
+            text="Cargar una al editor",
+            command=self.load_selected_sequence_from_library,
+        ).pack(side="left", padx=(5, 0))
+        self.btn_sequence_library_run = ttk.Button(
+            library_controls,
+            text="Ejecutar seleccionadas",
+            command=self.start_selected_saved_sequences,
+            style="Success.TButton",
+        )
+        self.btn_sequence_library_run.pack(side="left", padx=(5, 0))
+        ttk.Button(
+            library_controls,
+            text="Marcar todas",
+            command=lambda: self.set_all_sequence_library_checks(True),
+        ).pack(side="right", padx=(5, 0))
+        ttk.Button(
+            library_controls,
+            text="Ninguna",
+            command=lambda: self.set_all_sequence_library_checks(False),
+        ).pack(side="right")
+
+        library_list_shell = ttk.Frame(library_frame)
+        library_list_shell.pack(fill="x")
+        self.sequence_library_canvas = tk.Canvas(
+            library_list_shell,
+            height=68 if self.compact_layout else 84,
+            bg="white",
+            highlightthickness=1,
+            highlightbackground="#d8e0ec",
+        )
+        library_scrollbar = ttk.Scrollbar(
+            library_list_shell,
+            orient="vertical",
+            command=self.sequence_library_canvas.yview,
+        )
+        self.sequence_library_list_frame = ttk.Frame(self.sequence_library_canvas)
+        self.sequence_library_window_id = self.sequence_library_canvas.create_window(
+            (0, 0), window=self.sequence_library_list_frame, anchor="nw"
+        )
+        self.sequence_library_canvas.configure(yscrollcommand=library_scrollbar.set)
+        self.sequence_library_canvas.pack(side="left", fill="x", expand=True)
+        library_scrollbar.pack(side="right", fill="y")
+        self.sequence_library_list_frame.bind(
+            "<Configure>",
+            lambda _event: self.sequence_library_canvas.configure(
+                scrollregion=self.sequence_library_canvas.bbox("all")
+            ),
+        )
+        self.sequence_library_canvas.bind(
+            "<Configure>",
+            lambda event: self.sequence_library_canvas.itemconfigure(
+                self.sequence_library_window_id, width=max(1, event.width)
+            ),
+        )
 
         action_builder = ttk.LabelFrame(
             sequence_frame,
@@ -1842,8 +1927,134 @@ class ProfessionalPhoneController:
         try:
             Path(path).write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
             self.sequence_status_var.set(f"Secuencia guardada: {Path(path).name}")
+            self.refresh_sequence_library()
         except Exception as error:
             messagebox.showerror("No se pudo guardar", str(error), parent=self.root)
+
+    def read_sequence_file(self, path):
+        path = Path(path)
+        payload = json.loads(path.read_text(encoding="utf-8"))
+        if (
+            not isinstance(payload, dict)
+            or payload.get("format") != "panel-celulares-sequence"
+            or payload.get("version") != 1
+        ):
+            raise ValueError("El archivo no pertenece al formato de secuencias versión 1.")
+        raw_steps = payload.get("steps")
+        if not isinstance(raw_steps, list) or len(raw_steps) > 500:
+            raise ValueError("La lista de pasos no es válida o supera el máximo de 500.")
+        validated = []
+        for raw_step in raw_steps:
+            step = self.validate_sequence_step(raw_step)
+            if not step:
+                raise ValueError("El archivo contiene un paso no permitido.")
+            validated.append(step)
+        if not validated:
+            raise ValueError("La secuencia no contiene pasos.")
+        return validated
+
+    def refresh_sequence_library(self):
+        if not hasattr(self, "sequence_library_list_frame"):
+            return
+        selected_names = {
+            name for name, variable in self.sequence_library_vars.items() if variable.get()
+        }
+        for child in self.sequence_library_list_frame.winfo_children():
+            child.destroy()
+        self.sequence_library_vars = {}
+        self.sequence_library_files = {}
+        self.sequence_dir.mkdir(parents=True, exist_ok=True)
+
+        valid_count = 0
+        for path in sorted(self.sequence_dir.glob("*.json"), key=lambda item: item.name.casefold()):
+            try:
+                steps = self.read_sequence_file(path)
+            except Exception as error:
+                row = ttk.Frame(self.sequence_library_list_frame)
+                row.pack(fill="x", padx=5, pady=2)
+                ttk.Label(row, text=f"⚠ {path.name}", foreground="#b04a3a").pack(side="left")
+                ttk.Label(row, text=f"No válida: {error}", foreground="#b04a3a").pack(side="right")
+                continue
+            variable = tk.BooleanVar(value=path.name in selected_names)
+            self.sequence_library_vars[path.name] = variable
+            self.sequence_library_files[path.name] = path
+            row = ttk.Frame(self.sequence_library_list_frame)
+            row.pack(fill="x", padx=5, pady=2)
+            ttk.Checkbutton(row, text=path.name, variable=variable).pack(side="left")
+            ttk.Label(row, text=f"{len(steps)} pasos", foreground="#52647d").pack(side="right")
+            valid_count += 1
+
+        if valid_count == 0:
+            ttk.Label(
+                self.sequence_library_list_frame,
+                text="No hay secuencias guardadas válidas en la carpeta secuencias.",
+                foreground="#52647d",
+            ).pack(anchor="w", padx=7, pady=7)
+
+    def set_all_sequence_library_checks(self, selected):
+        for variable in self.sequence_library_vars.values():
+            variable.set(bool(selected))
+
+    def selected_sequence_library_paths(self):
+        return [
+            self.sequence_library_files[name]
+            for name, variable in self.sequence_library_vars.items()
+            if variable.get() and name in self.sequence_library_files
+        ]
+
+    def load_sequence_into_editor(self, path):
+        validated = self.read_sequence_file(path)
+        self.sequence_steps = validated
+        self.refresh_sequence_tree(select_index=0)
+        self.draw_sequence_markers()
+        self.sequence_status_var.set(f"Secuencia cargada: {Path(path).name} · {len(validated)} pasos.")
+
+    def load_selected_sequence_from_library(self):
+        if self.sequence_running:
+            return
+        paths = self.selected_sequence_library_paths()
+        if len(paths) != 1:
+            return messagebox.showwarning(
+                "Biblioteca de secuencias",
+                "Marca exactamente una secuencia para cargarla al editor.",
+                parent=self.root,
+            )
+        try:
+            self.load_sequence_into_editor(paths[0])
+        except Exception as error:
+            messagebox.showerror("No se pudo cargar", str(error), parent=self.root)
+
+    def start_selected_saved_sequences(self):
+        if self.sequence_running:
+            return
+        paths = self.selected_sequence_library_paths()
+        if not paths:
+            return messagebox.showwarning(
+                "Biblioteca de secuencias",
+                "Marca al menos una secuencia guardada para ejecutarla.",
+                parent=self.root,
+            )
+        indexed_steps = []
+        try:
+            for path in paths:
+                steps = self.read_sequence_file(path)
+                for index, step in enumerate(steps):
+                    tagged_step = dict(step)
+                    tagged_step["_sequence_name"] = path.name
+                    indexed_steps.append((index, tagged_step))
+        except Exception as error:
+            return messagebox.showerror("No se pudo preparar la ejecución", str(error), parent=self.root)
+        if len(indexed_steps) > 5000:
+            return messagebox.showwarning(
+                "Demasiados pasos",
+                "La selección conjunta supera 5000 pasos. Reduce el número de secuencias activas.",
+                parent=self.root,
+            )
+        names = ", ".join(path.name for path in paths)
+        self.start_sequence_steps(
+            indexed_steps,
+            f"{len(paths)} secuencias seleccionadas ({names})",
+        )
 
     def load_sequence_file(self):
         if self.sequence_running:
@@ -1858,22 +2069,7 @@ class ProfessionalPhoneController:
         if not path:
             return
         try:
-            payload = json.loads(Path(path).read_text(encoding="utf-8"))
-            if not isinstance(payload, dict) or payload.get("format") != "panel-celulares-sequence" or payload.get("version") != 1:
-                raise ValueError("El archivo no pertenece al formato de secuencias versión 1.")
-            raw_steps = payload.get("steps")
-            if not isinstance(raw_steps, list) or len(raw_steps) > 500:
-                raise ValueError("La lista de pasos no es válida o supera el máximo de 500.")
-            validated = []
-            for raw_step in raw_steps:
-                step = self.validate_sequence_step(raw_step)
-                if not step:
-                    raise ValueError("El archivo contiene un paso no permitido.")
-                validated.append(step)
-            self.sequence_steps = validated
-            self.refresh_sequence_tree(select_index=0 if validated else None)
-            self.draw_sequence_markers()
-            self.sequence_status_var.set(f"Secuencia cargada: {Path(path).name} · {len(validated)} pasos.")
+            self.load_sequence_into_editor(path)
         except Exception as error:
             messagebox.showerror("No se pudo cargar", str(error), parent=self.root)
 
@@ -1889,6 +2085,11 @@ class ProfessionalPhoneController:
             steps = [(index, dict(self.sequence_steps[index]))]
         else:
             steps = [(index, dict(step)) for index, step in enumerate(self.sequence_steps)]
+        self.start_sequence_steps(steps, "secuencia del editor")
+
+    def start_sequence_steps(self, steps, source_label):
+        if self.sequence_running:
+            return
         devices, busy = self.claim_devices(self.get_selected_devices(), "Secuencia de acciones")
         if not devices:
             return messagebox.showwarning("Equipos ocupados", "Selecciona teléfonos disponibles para ejecutar la secuencia.")
@@ -1901,8 +2102,11 @@ class ProfessionalPhoneController:
         self.sequence_running = True
         self.btn_sequence_step.config(state="disabled")
         self.btn_sequence_all.config(state="disabled")
+        self.btn_sequence_library_run.config(state="disabled")
         self.btn_sequence_stop.config(state="normal")
-        self.sequence_status_var.set(f"Ejecutando {len(steps)} paso(s) en {len(devices)} teléfono(s)...")
+        self.sequence_status_var.set(
+            f"Ejecutando {source_label}: {len(steps)} paso(s) en {len(devices)} teléfono(s)..."
+        )
         threading.Thread(
             target=self.sequence_execution_worker,
             args=(devices, steps, previous_tasks),
@@ -2224,17 +2428,24 @@ class ProfessionalPhoneController:
         devices = [device]
         list_context = {device: {"items": [], "index": 0} for device in devices}
         try:
+            previous_sequence_name = None
             for position, (original_index, step) in enumerate(indexed_steps, start=1):
                 if self.sequence_stop_event.is_set() or self.app_closing.is_set():
                     result = "detenida"
                     break
                 action, detail = self.sequence_step_description(step)
+                sequence_name = step.get("_sequence_name")
+                if sequence_name and sequence_name != previous_sequence_name:
+                    previous_sequence_name = sequence_name
+                    list_context[device] = {"items": [], "index": 0}
+                    self.log(f"[{device}] Iniciando secuencia guardada: {sequence_name}")
                 self.post_ui(
-                    lambda pos=position, total=len(indexed_steps), act=action: self.sequence_status_var.set(
-                        f"Paso {pos} de {total}: {act}."
+                    lambda pos=position, total=len(indexed_steps), act=action, name=sequence_name: self.sequence_status_var.set(
+                        f"{name + ' · ' if name else ''}Paso {pos} de {total}: {act}."
                     )
                 )
-                self.log(f"Secuencia · paso {original_index + 1}: {action} · {detail}")
+                prefix = f"{sequence_name} · " if sequence_name else "Secuencia · "
+                self.log(f"{prefix}paso {original_index + 1}: {action} · {detail}")
                 if step["type"] == "load_list":
                     for device in devices:
                         list_context[device] = {"items": list(step["items"]), "index": 0}
@@ -2384,6 +2595,7 @@ class ProfessionalPhoneController:
         self.sequence_running = False
         self.btn_sequence_step.config(state="normal")
         self.btn_sequence_all.config(state="normal")
+        self.btn_sequence_library_run.config(state="normal")
         self.btn_sequence_stop.config(state="disabled")
         self.sequence_status_var.set(f"Secuencia {result}.")
         for device in devices:
