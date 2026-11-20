@@ -21,6 +21,23 @@ Esta bitácora registra el estado base del proyecto y todos los cambios que se r
 
 ## Cambios completados
 
+### CHG-20261120-1012 — Publicación de la versión integrada en el servidor de operación
+
+- Fecha y hora: 2026-11-20 10:12 (America/Mexico_City).
+- Tipo: Publicación / Respaldo.
+- Estado: Completado y verificado.
+- Solicitud: subir al servidor los cambios vigentes del Panel Celulares.
+- Origen: rama local `integracion`, commit funcional `0fa559b` con documentación en `de6fce6`.
+- Destino: `C:\Users\Admin\Desktop\Panel Celulares V2` mediante WinRM sobre HTTPS.
+- Archivos publicados: `panel.py`, `license_guard.py`, `Construir Ejecutable.ps1`, `LEEME.txt` y `BITACORA.md`.
+- Referencia previa de rollback: `C:\Users\Admin\Desktop\Panel Celulares V2\_rollback\DEPLOY-20261120-101258`.
+- Pruebas realizadas: comparación SHA-256 individual entre la copia local y cada archivo publicado.
+- Resultado: todos los archivos coincidieron exactamente después de la transferencia.
+- Datos preservados: no se reemplazaron configuraciones locales, registros operativos, secuencias guardadas ni carpetas de datos del servidor.
+- Limitaciones o pruebas pendientes: el panel no se abrió ni se interrumpió en el servidor durante la publicación; queda disponible para la prueba operativa normal del usuario.
+- Publicado o respaldado: Sí; servidor de operación y respaldo previo verificado.
+- Procedimiento de rollback: restaurar los cinco archivos desde la carpeta `DEPLOY-20261120-101258`.
+
 ### CHG-20261119-0259 — Biblioteca de secuencias múltiples y pestañas desplazables
 
 - Fecha y hora de inicio: 2026-11-19 02:59:44 (America/Mexico_City).
