@@ -40,8 +40,11 @@ Esta bitácora registra el estado base del proyecto y todos los cambios que se r
   - Prueba aislada con dos JSON temporales: ambos se eliminaron después de confirmar y el estado mostró la cantidad correcta.
   - Prueba de seguridad con un JSON fuera de la carpeta `secuencias`: el archivo se conservó y la operación mostró error.
 - Referencia previa de rollback: commit `db09be6` de la rama `integracion` y respaldo del servidor `DEPLOY-20261120-101258`.
-- Publicado o respaldado: pendiente de commit y publicación al servidor.
-- Procedimiento de rollback: revertir el commit funcional resultante o restaurar la versión anterior desde el respaldo indicado.
+- Commit funcional resultante: `4aa229c` (`feat: eliminar secuencias guardadas`).
+- Publicado o respaldado: Sí; publicado en GitHub rama `integracion` y en `C:\Users\Admin\Desktop\Panel Celulares V2`.
+- Respaldo previo del servidor: `C:\Users\Admin\Desktop\Panel Celulares V2\_rollback\CHG-20261120-1028`.
+- Verificación de publicación: hashes SHA-256 de `panel.py`, `LEEME.txt` y `BITACORA.md` coincidentes; panel reiniciado en la sesión visible del servidor.
+- Procedimiento de rollback: revertir el commit `4aa229c` o restaurar los tres archivos desde el respaldo del servidor indicado.
 
 ### CHG-20261120-1012 — Publicación de la versión integrada en el servidor de operación
 
