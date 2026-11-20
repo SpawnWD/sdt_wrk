@@ -84,6 +84,7 @@ class ProfessionalPhoneController:
         "Presionar y deslizar": "swipe",
         "Identificar texto y pulsar": "tap_text",
         "Identificar Publicar y pulsar": "tap_publish",
+        "Identificar Escribe algo... y pulsar": "tap_write_something",
         "Escribir texto": "text",
         "Ocultar teclado": "hide_keyboard",
         "Subir imagen/video al teléfono": "upload_media",
@@ -160,6 +161,7 @@ class ProfessionalPhoneController:
         self.sequence_display_geometry = None
         self.sequence_photo = None
         self.sequence_preview_window = None
+        self.sequence_preview_status_var = None
         self.sequence_canvas = None
         self.sequence_record_mode = "tap"
         self.sequence_swipe_start = None
@@ -1166,6 +1168,17 @@ class ProfessionalPhoneController:
             ).pack(anchor="w")
             return
 
+        if action_type == "tap_write_something":
+            ttk.Label(
+                self.sequence_action_fields,
+                text=(
+                    'Localiza el texto exacto "Escribe algo..." y pulsa su centro. '
+                    "Reconoce tanto tres puntos como el carácter de puntos suspensivos y no usa coordenadas fijas."
+                ),
+                foreground="#1d5f91",
+            ).pack(anchor="w")
+            return
+
         if action_type == "hide_keyboard":
             ttk.Label(
                 self.sequence_action_fields,
@@ -1446,13 +1459,23 @@ class ProfessionalPhoneController:
         device = devices[0]
         self.open_sequence_preview_window()
         self.sequence_status_var.set(f"Capturando pantalla de {self.display_device_name(device)}...")
+        if self.sequence_preview_status_var is not None:
+            self.sequence_preview_status_var.set(
+                f"Capturando {self.display_device_name(device)}..."
+            )
 
         def worker():
-            screen = self.capture_device_screen(device)
-            if screen is None:
-                self.post_ui(lambda: self.sequence_status_var.set("No se pudo capturar la pantalla."))
+            png_bytes = self.capture_device_png(device)
+            if not png_bytes:
+                def report_capture_error():
+                    self.sequence_status_var.set("No se pudo capturar la pantalla.")
+                    if self.sequence_preview_status_var is not None:
+                        self.sequence_preview_status_var.set(
+                            "No se recibió imagen del teléfono. Comprueba la conexión ADB y pulsa Actualizar captura."
+                        )
+                self.post_ui(report_capture_error)
                 return
-            self.post_ui(lambda img=screen, dev=device: self.show_sequence_screen(dev, img))
+            self.post_ui(lambda data=png_bytes, dev=device: self.show_sequence_screen(dev, data))
 
         threading.Thread(target=worker, daemon=True).start()
 
@@ -1484,6 +1507,15 @@ class ProfessionalPhoneController:
             command=self.capture_sequence_screen,
         ).pack(side="right")
 
+        self.sequence_preview_status_var = tk.StringVar(value="Preparando captura...")
+        ttk.Label(
+            window,
+            textvariable=self.sequence_preview_status_var,
+            anchor="center",
+            foreground="#1d5f91",
+            padding=(8, 0, 8, 6),
+        ).pack(fill="x")
+
         self.sequence_canvas = tk.Canvas(
             window,
             width=430,
@@ -1503,6 +1535,7 @@ class ProfessionalPhoneController:
     def close_sequence_preview_window(self):
         window = self.sequence_preview_window
         self.sequence_preview_window = None
+        self.sequence_preview_status_var = None
         self.sequence_canvas = None
         self.sequence_photo = None
         self.sequence_display_geometry = None
@@ -1515,27 +1548,56 @@ class ProfessionalPhoneController:
             except tk.TclError:
                 pass
 
-    def show_sequence_screen(self, device, screen):
-        if screen is None or not OPENCV_AVAILABLE:
-            self.sequence_status_var.set("La vista previa requiere OpenCV.")
+    def show_sequence_screen(self, device, png_bytes):
+        if not png_bytes:
+            self.sequence_status_var.set("No se recibió una imagen válida.")
             return
         self.open_sequence_preview_window()
         if self.sequence_canvas is None:
             self.sequence_status_var.set("No se pudo abrir la ventana de captura.")
             return
         self.sequence_preview_window.update_idletasks()
-        source_height, source_width = screen.shape[:2]
         canvas_width = max(320, self.sequence_canvas.winfo_width())
         canvas_height = max(300, self.sequence_canvas.winfo_height())
-        scale = min(canvas_width / source_width, canvas_height / source_height)
-        display_width = max(1, int(source_width * scale))
-        display_height = max(1, int(source_height * scale))
-        resized = cv2.resize(screen, (display_width, display_height), interpolation=cv2.INTER_AREA)
-        ok, encoded = cv2.imencode(".png", resized)
-        if not ok:
-            self.sequence_status_var.set("No se pudo preparar la vista previa.")
+        encoded_data = base64.b64encode(png_bytes).decode("ascii")
+        try:
+            source_photo = tk.PhotoImage(data=encoded_data)
+        except tk.TclError as error:
+            self.sequence_status_var.set("La captura recibida no es una imagen PNG válida.")
+            if self.sequence_preview_status_var is not None:
+                self.sequence_preview_status_var.set(f"No se pudo mostrar la captura: {error}")
             return
-        self.sequence_photo = tk.PhotoImage(data=base64.b64encode(encoded.tobytes()).decode("ascii"))
+        source_width = source_photo.width()
+        source_height = source_photo.height()
+        if source_width <= 0 or source_height <= 0:
+            self.sequence_status_var.set("La captura recibida no tiene dimensiones válidas.")
+            return
+
+        if OPENCV_AVAILABLE:
+            screen = cv2.imdecode(np.frombuffer(png_bytes, np.uint8), cv2.IMREAD_COLOR)
+        else:
+            screen = None
+        if screen is not None:
+            scale = min(canvas_width / source_width, canvas_height / source_height)
+            display_width = max(1, int(source_width * scale))
+            display_height = max(1, int(source_height * scale))
+            resized = cv2.resize(screen, (display_width, display_height), interpolation=cv2.INTER_AREA)
+            ok, encoded = cv2.imencode(".png", resized)
+            if not ok:
+                self.sequence_status_var.set("No se pudo preparar la vista previa.")
+                return
+            self.sequence_photo = tk.PhotoImage(
+                data=base64.b64encode(encoded.tobytes()).decode("ascii")
+            )
+        else:
+            reduction = max(
+                1,
+                math.ceil(source_width / canvas_width),
+                math.ceil(source_height / canvas_height),
+            )
+            self.sequence_photo = source_photo.subsample(reduction, reduction)
+            display_width = self.sequence_photo.width()
+            display_height = self.sequence_photo.height()
         offset_x = (canvas_width - display_width) // 2
         offset_y = (canvas_height - display_height) // 2
         self.sequence_canvas.delete("all")
@@ -1544,6 +1606,10 @@ class ProfessionalPhoneController:
         self.sequence_display_geometry = (offset_x, offset_y, display_width, display_height)
         self.sequence_swipe_start = None
         self.draw_sequence_markers()
+        if self.sequence_preview_status_var is not None:
+            self.sequence_preview_status_var.set(
+                f"{self.display_device_name(device)} · {source_width} × {source_height}"
+            )
         self.sequence_status_var.set(
             f"Captura de {self.display_device_name(device)}: {source_width} × {source_height}. Pulsa sobre la imagen para agregar un toque."
         )
@@ -1659,6 +1725,8 @@ class ProfessionalPhoneController:
             return {"type": "tap_text", "target_text": target_text}
         if step_type == "tap_publish":
             return {"type": "tap_publish"}
+        if step_type == "tap_write_something":
+            return {"type": "tap_write_something"}
         if step_type == "hide_keyboard":
             return {"type": "hide_keyboard"}
         if step_type == "upload_media":
@@ -1780,6 +1848,8 @@ class ProfessionalPhoneController:
             return "Identificar y pulsar", f'Texto exacto: "{step["target_text"][:80]}"'
         if step["type"] == "tap_publish":
             return "Identificar Publicar", "Pulsar la coincidencia exacta superior"
+        if step["type"] == "tap_write_something":
+            return 'Identificar "Escribe algo..."', "Pulsar la coincidencia completa superior"
         if step["type"] == "hide_keyboard":
             return "Ocultar teclado", "Cerrar sólo cuando Android confirme que está visible"
         if step["type"] == "upload_media":
@@ -2613,6 +2683,8 @@ class ProfessionalPhoneController:
                         self.tap_visible_text(device, step["target_text"])
                     elif step["type"] == "tap_publish":
                         self.tap_visible_text(device, "Publicar")
+                    elif step["type"] == "tap_write_something":
+                        self.tap_visible_text(device, "Escribe algo...")
                     elif step["type"] == "hide_keyboard":
                         self.hide_keyboard_if_visible(device)
                     elif step["type"] == "upload_media":
@@ -6601,9 +6673,7 @@ class ProfessionalPhoneController:
         expected = re.sub(r"\s+", " ", expected)
         return bool(expected) and expected in visible
 
-    def capture_device_screen(self, device):
-        if not OPENCV_AVAILABLE:
-            return None
+    def capture_device_png(self, device):
         try:
             result = subprocess.run(
                 [self.adb, "-s", device, "exec-out", "screencap", "-p"],
@@ -6616,10 +6686,18 @@ class ProfessionalPhoneController:
                 detail = result.stderr.decode(errors="replace").strip() if result.stderr else "captura vacía"
                 self.log(f"[{device}] No se pudo capturar la pantalla: {detail}")
                 return None
-            return cv2.imdecode(np.frombuffer(result.stdout, np.uint8), cv2.IMREAD_COLOR)
+            return result.stdout
         except Exception as error:
             self.log(f"[{device}] No se pudo capturar la pantalla: {error}")
             return None
+
+    def capture_device_screen(self, device):
+        if not OPENCV_AVAILABLE:
+            return None
+        png_bytes = self.capture_device_png(device)
+        if not png_bytes:
+            return None
+        return cv2.imdecode(np.frombuffer(png_bytes, np.uint8), cv2.IMREAD_COLOR)
 
     def locate_blue_send_arrow(self, screen):
         """Localiza un componente azul de envío en el sector derecho del editor."""

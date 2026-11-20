@@ -21,6 +21,35 @@ Esta bitácora registra el estado base del proyecto y todos los cambios que se r
 
 ## Cambios completados
 
+### CHG-20261120-1038 — Acción dedicada “Escribe algo...” y corrección de captura negra
+
+- Fecha y hora: 2026-11-20 10:38 (America/Mexico_City).
+- Tipo: Funcionalidad / Secuencias / Corrección.
+- Estado: Completado y validado técnicamente.
+- Solicitudes:
+  - Crear una acción similar a `Identificar Publicar y pulsar` que localice el texto `Escribe algo...` y lo pulse.
+  - Corregir la ventana negra al usar `Abrir/capturar teléfono seleccionado` en Secuencias.
+- Implementación:
+  - Se añadió `Identificar Escribe algo... y pulsar` al catálogo, al formato JSON versión 1, a la tabla de pasos y al ejecutor multidispositivo.
+  - La coincidencia es completa y normaliza `Escribe algo...` y `Escribe algo…`; utiliza accesibilidad y OCR sin coordenadas fijas.
+  - La captura de Secuencias obtiene primero el PNG crudo mediante ADB y puede mostrarlo con Tkinter aunque OpenCV no esté instalado.
+  - Si ADB no devuelve una imagen, la ventana independiente muestra el diagnóstico y permite reintentar con `Actualizar captura` en lugar de permanecer solamente negra.
+  - Cuando OpenCV está disponible se conserva el escalado de mayor calidad; el ejecutable lo incluye.
+- Diagnóstico del servidor: el panel fuente se estaba abriendo con Python 3.14 sin OpenCV; el teléfono `W555NEU0100057516` sí aparece conectado y autorizado por ADB.
+- Archivos modificados: `panel.py`, `Construir Ejecutable.ps1`, `LEEME.txt` y `BITACORA.md`.
+- Pruebas realizadas:
+  - `python -m py_compile panel.py license_guard.py`: correcto.
+  - `git diff --check`: correcto.
+  - Prueba lógica: `tap_write_something` se valida y describe correctamente dentro del JSON versión 1.
+  - Prueba de normalización: `Escribe algo...` y `Escribe algo…` producen la misma comparación exacta.
+  - ADB del servidor confirmó un teléfono en estado `device`.
+  - Construcción PyInstaller 1.88.22 terminada correctamente con Python 3.12, OpenCV 5.0.0 y NumPy 2.5.4 incluidos.
+- Entrega: `release_1.88.22/TERAsoft.exe` (87,101,222 bytes) y `SHA256.txt`.
+- SHA-256: `1FEA2F682CCC75313128518A0EF93F08B93EF712FEC6690A8C6E49085203DF04`.
+- Referencia previa de rollback: commit `103518f` de la rama `integracion` y respaldo del servidor `CHG-20261120-1028`.
+- Publicado o respaldado: pendiente de commit y publicación al servidor.
+- Procedimiento de rollback: revertir el commit funcional resultante y abrir la versión 1.88.21 o restaurar el respaldo indicado.
+
 ### CHG-20261120-1028 — Eliminación controlada de secuencias guardadas
 
 - Fecha y hora: 2026-11-20 10:28 (America/Mexico_City).
