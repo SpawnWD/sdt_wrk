@@ -121,6 +121,7 @@ ORGANIZACIÓN DE LA INTERFAZ
 - La ventana calcula su tamaño con la resolución disponible. En pantallas pequeñas reduce márgenes y navegación, distribuye las barras densas en varias filas y abre el registro de actividad contraído para conservar visibles los controles principales; `Mostrar` permite recuperarlo en cualquier momento.
 - Cada pestaña usa un área vertical desplazable ajustada automáticamente al ancho disponible, de modo que los controles inferiores siguen accesibles en resoluciones pequeñas.
 - `Secuencias guardadas` muestra una casilla por cada JSON válido de la carpeta `secuencias`, usando exactamente el nombre con el que fue guardado. Se pueden marcar varias y ejecutarlas consecutivamente, en el orden alfabético mostrado, mientras cada teléfono seleccionado procesa la misma cadena de forma simultánea. `Detener` cancela la cadena completa.
+- `Eliminar seleccionadas` borra las secuencias marcadas después de mostrar una confirmación con sus nombres. La función sólo admite archivos JSON válidos dentro de la carpeta `secuencias` y queda deshabilitada mientras se ejecuta un proceso.
 - La ventana y el ejecutable utilizan el icono del teléfono con sombrero cónico incluido en `assets`.
 - El encabezado muestra la sección actual y el número de teléfonos conectados y seleccionados.
 - La navegación lateral agrupa las nueve secciones en Operación, Automatización y Herramientas; el botón azul indica la vista activa.

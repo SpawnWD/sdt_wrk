@@ -943,13 +943,22 @@ class ProfessionalPhoneController:
             style="Success.TButton",
         )
         self.btn_sequence_library_run.pack(side="left", padx=(5, 0))
+        library_selection_controls = ttk.Frame(library_frame)
+        library_selection_controls.pack(fill="x", pady=(0, 4))
+        self.btn_sequence_library_delete = ttk.Button(
+            library_selection_controls,
+            text="Eliminar seleccionadas",
+            command=self.delete_selected_sequences_from_library,
+            style="Danger.TButton",
+        )
+        self.btn_sequence_library_delete.pack(side="left")
         ttk.Button(
-            library_controls,
+            library_selection_controls,
             text="Marcar todas",
             command=lambda: self.set_all_sequence_library_checks(True),
         ).pack(side="right", padx=(5, 0))
         ttk.Button(
-            library_controls,
+            library_selection_controls,
             text="Ninguna",
             command=lambda: self.set_all_sequence_library_checks(False),
         ).pack(side="right")
@@ -2002,6 +2011,84 @@ class ProfessionalPhoneController:
             if variable.get() and name in self.sequence_library_files
         ]
 
+    def delete_selected_sequences_from_library(self):
+        if self.sequence_running:
+            return messagebox.showwarning(
+                "Biblioteca de secuencias",
+                "Detén la ejecución antes de eliminar secuencias guardadas.",
+                parent=self.root,
+            )
+        paths = self.selected_sequence_library_paths()
+        if not paths:
+            return messagebox.showwarning(
+                "Biblioteca de secuencias",
+                "Marca al menos una secuencia para eliminarla.",
+                parent=self.root,
+            )
+
+        sequence_root = self.sequence_dir.resolve()
+        safe_paths = []
+        for path in paths:
+            try:
+                resolved = Path(path).resolve(strict=True)
+            except (OSError, RuntimeError):
+                return messagebox.showerror(
+                    "No se puede eliminar",
+                    f"La secuencia ya no existe o no se puede validar: {Path(path).name}",
+                    parent=self.root,
+                )
+            if resolved.parent != sequence_root or resolved.suffix.casefold() != ".json":
+                return messagebox.showerror(
+                    "No se puede eliminar",
+                    "Sólo se pueden eliminar archivos JSON ubicados directamente en la carpeta secuencias.",
+                    parent=self.root,
+                )
+            safe_paths.append(resolved)
+
+        names = [path.name for path in safe_paths]
+        visible_names = names[:12]
+        detail = "\n".join(f"• {name}" for name in visible_names)
+        if len(names) > len(visible_names):
+            detail += f"\n• … y {len(names) - len(visible_names)} más"
+        confirmed = messagebox.askyesno(
+            "Eliminar secuencias guardadas",
+            (
+                f"Se eliminarán {len(names)} secuencia(s):\n\n{detail}\n\n"
+                "Esta acción no se puede deshacer desde el panel. ¿Deseas continuar?"
+            ),
+            parent=self.root,
+            icon="warning",
+        )
+        if not confirmed:
+            return
+
+        deleted = []
+        failures = []
+        for path in safe_paths:
+            try:
+                path.unlink()
+                deleted.append(path.name)
+            except OSError as error:
+                failures.append(f"{path.name}: {error}")
+
+        self.refresh_sequence_library()
+        if deleted:
+            self.sequence_status_var.set(
+                f"Secuencias eliminadas: {len(deleted)} ({', '.join(deleted)})."
+            )
+        if failures:
+            messagebox.showerror(
+                "Eliminación incompleta",
+                "No fue posible eliminar:\n\n" + "\n".join(failures),
+                parent=self.root,
+            )
+        elif deleted:
+            messagebox.showinfo(
+                "Biblioteca de secuencias",
+                f"Se eliminaron {len(deleted)} secuencia(s).",
+                parent=self.root,
+            )
+
     def load_sequence_into_editor(self, path):
         validated = self.read_sequence_file(path)
         self.sequence_steps = validated
@@ -2103,6 +2190,7 @@ class ProfessionalPhoneController:
         self.btn_sequence_step.config(state="disabled")
         self.btn_sequence_all.config(state="disabled")
         self.btn_sequence_library_run.config(state="disabled")
+        self.btn_sequence_library_delete.config(state="disabled")
         self.btn_sequence_stop.config(state="normal")
         self.sequence_status_var.set(
             f"Ejecutando {source_label}: {len(steps)} paso(s) en {len(devices)} teléfono(s)..."
@@ -2596,6 +2684,7 @@ class ProfessionalPhoneController:
         self.btn_sequence_step.config(state="normal")
         self.btn_sequence_all.config(state="normal")
         self.btn_sequence_library_run.config(state="normal")
+        self.btn_sequence_library_delete.config(state="normal")
         self.btn_sequence_stop.config(state="disabled")
         self.sequence_status_var.set(f"Secuencia {result}.")
         for device in devices:

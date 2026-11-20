@@ -21,6 +21,28 @@ Esta bitácora registra el estado base del proyecto y todos los cambios que se r
 
 ## Cambios completados
 
+### CHG-20261120-1028 — Eliminación controlada de secuencias guardadas
+
+- Fecha y hora: 2026-11-20 10:28 (America/Mexico_City).
+- Tipo: Funcionalidad / Seguridad operativa.
+- Estado: Completado y validado.
+- Solicitud: agregar en la pestaña Secuencias un botón para eliminar las listas o secuencias creadas.
+- Implementación:
+  - Se agregó `Eliminar seleccionadas` debajo de las acciones principales de la biblioteca para conservarlo visible en resoluciones pequeñas.
+  - La operación exige marcar una o más secuencias y confirmar una lista con sus nombres antes del borrado.
+  - Sólo admite archivos con extensión `.json` ubicados directamente dentro de la carpeta autorizada `secuencias`; las rutas externas o no verificables se rechazan.
+  - El botón queda deshabilitado mientras se ejecuta una secuencia y la biblioteca se actualiza al terminar.
+  - Los pasos que ya están cargados en el editor no se modifican.
+- Archivos modificados: `panel.py`, `LEEME.txt` y `BITACORA.md`.
+- Pruebas realizadas:
+  - `python -m py_compile panel.py license_guard.py`: correcto.
+  - `git diff --check`: correcto.
+  - Prueba aislada con dos JSON temporales: ambos se eliminaron después de confirmar y el estado mostró la cantidad correcta.
+  - Prueba de seguridad con un JSON fuera de la carpeta `secuencias`: el archivo se conservó y la operación mostró error.
+- Referencia previa de rollback: commit `db09be6` de la rama `integracion` y respaldo del servidor `DEPLOY-20261120-101258`.
+- Publicado o respaldado: pendiente de commit y publicación al servidor.
+- Procedimiento de rollback: revertir el commit funcional resultante o restaurar la versión anterior desde el respaldo indicado.
+
 ### CHG-20261120-1012 — Publicación de la versión integrada en el servidor de operación
 
 - Fecha y hora: 2026-11-20 10:12 (America/Mexico_City).
