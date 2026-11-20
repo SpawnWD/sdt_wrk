@@ -43,8 +43,11 @@ Esta bitácora registra el estado base del proyecto y todos los cambios que se r
 - Entrega: `release_1.88.23/TERAsoft.exe` (87,100,691 bytes) y `SHA256.txt`.
 - SHA-256: `FB528CE1BC6D6E3F377DEF5A1620FA38483C7288FA540015BC2289518B748E92`.
 - Referencia previa de rollback: commit `f160bc6`, ejecutable 1.88.22 y respaldo del servidor `CHG-20261120-1038`.
-- Publicado o respaldado: pendiente de commit y publicación al servidor.
-- Procedimiento de rollback: revertir el commit funcional resultante y abrir la versión 1.88.22.
+- Commit funcional resultante: `bd4a669` (`feat: agregar boton atras en secuencias`).
+- Publicado o respaldado: Sí; GitHub rama `integracion` y servidor `C:\Users\Admin\Desktop\Panel Celulares V2`.
+- Respaldo previo del servidor: `C:\Users\Admin\Desktop\Panel Celulares V2\_rollback\CHG-20261120-1121`.
+- Verificación de publicación: hashes del código y del ejecutable coincidentes; `TERAsoft.exe` 1.88.23 quedó abierto en la sesión visible 2.
+- Procedimiento de rollback: revertir `bd4a669`, restaurar los archivos del respaldo indicado y abrir la versión 1.88.22.
 
 ### CHG-20261120-1038 — Acción dedicada “Escribe algo...” y corrección de captura negra
 
