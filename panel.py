@@ -162,6 +162,7 @@ class ProfessionalPhoneController:
         self.sequence_photo = None
         self.sequence_preview_window = None
         self.sequence_preview_status_var = None
+        self.sequence_preview_back_button = None
         self.sequence_canvas = None
         self.sequence_record_mode = "tap"
         self.sequence_swipe_start = None
@@ -925,6 +926,12 @@ class ProfessionalPhoneController:
             text="Abrir/capturar teléfono seleccionado",
             command=self.capture_sequence_screen,
         ).pack(side="left")
+        self.btn_sequence_phone_back = ttk.Button(
+            toolbar,
+            text="← Atrás en teléfono",
+            command=self.back_selected_sequence_device,
+        )
+        self.btn_sequence_phone_back.pack(side="left", padx=(7, 0))
         ttk.Button(toolbar, text="Guardar", command=self.save_sequence_file).pack(side="right", padx=(7, 0))
         ttk.Button(toolbar, text="Cargar", command=self.load_sequence_file).pack(side="right")
 
@@ -1479,6 +1486,52 @@ class ProfessionalPhoneController:
 
         threading.Thread(target=worker, daemon=True).start()
 
+    def back_selected_sequence_device(self):
+        if self.sequence_running:
+            return messagebox.showwarning(
+                "Secuencia activa",
+                "Detén la secuencia antes de enviar Atrás al teléfono.",
+                parent=self.root,
+            )
+        devices = self.get_selected_devices()
+        if len(devices) != 1:
+            return messagebox.showwarning(
+                "Selección",
+                "Selecciona exactamente un teléfono para enviar Atrás.",
+                parent=self.root,
+            )
+        device = devices[0]
+        self.sequence_status_var.set(
+            f"Enviando Atrás a {self.display_device_name(device)}..."
+        )
+
+        def worker():
+            ok, detail = self.run_on_device(
+                device, ["shell", "input", "keyevent", "4"], timeout=15
+            )
+            if ok:
+                self.log(f"[{device}] Secuencias: botón Atrás enviado correctamente.")
+            else:
+                self.log(f"[{device}] Secuencias: no se pudo enviar Atrás: {detail}")
+
+            def finish():
+                if ok:
+                    self.sequence_status_var.set(
+                        f"Atrás ejecutado en {self.display_device_name(device)}."
+                    )
+                    window = self.sequence_preview_window
+                    try:
+                        if window is not None and window.winfo_exists():
+                            self.root.after(650, self.capture_sequence_screen)
+                    except tk.TclError:
+                        pass
+                else:
+                    self.sequence_status_var.set("No se pudo ejecutar Atrás en el teléfono.")
+
+            self.post_ui(finish)
+
+        threading.Thread(target=worker, daemon=True).start()
+
     def open_sequence_preview_window(self):
         window = self.sequence_preview_window
         try:
@@ -1506,6 +1559,12 @@ class ProfessionalPhoneController:
             text="Actualizar captura",
             command=self.capture_sequence_screen,
         ).pack(side="right")
+        self.sequence_preview_back_button = ttk.Button(
+            header,
+            text="← Atrás",
+            command=self.back_selected_sequence_device,
+        )
+        self.sequence_preview_back_button.pack(side="right", padx=(0, 7))
 
         self.sequence_preview_status_var = tk.StringVar(value="Preparando captura...")
         ttk.Label(
@@ -1536,6 +1595,7 @@ class ProfessionalPhoneController:
         window = self.sequence_preview_window
         self.sequence_preview_window = None
         self.sequence_preview_status_var = None
+        self.sequence_preview_back_button = None
         self.sequence_canvas = None
         self.sequence_photo = None
         self.sequence_display_geometry = None
@@ -2261,6 +2321,9 @@ class ProfessionalPhoneController:
         self.btn_sequence_all.config(state="disabled")
         self.btn_sequence_library_run.config(state="disabled")
         self.btn_sequence_library_delete.config(state="disabled")
+        self.btn_sequence_phone_back.config(state="disabled")
+        if self.sequence_preview_back_button is not None:
+            self.sequence_preview_back_button.config(state="disabled")
         self.btn_sequence_stop.config(state="normal")
         self.sequence_status_var.set(
             f"Ejecutando {source_label}: {len(steps)} paso(s) en {len(devices)} teléfono(s)..."
@@ -2757,6 +2820,9 @@ class ProfessionalPhoneController:
         self.btn_sequence_all.config(state="normal")
         self.btn_sequence_library_run.config(state="normal")
         self.btn_sequence_library_delete.config(state="normal")
+        self.btn_sequence_phone_back.config(state="normal")
+        if self.sequence_preview_back_button is not None:
+            self.sequence_preview_back_button.config(state="normal")
         self.btn_sequence_stop.config(state="disabled")
         self.sequence_status_var.set(f"Secuencia {result}.")
         for device in devices:

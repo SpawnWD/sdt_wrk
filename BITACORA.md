@@ -21,6 +21,31 @@ Esta bitácora registra el estado base del proyecto y todos los cambios que se r
 
 ## Cambios completados
 
+### CHG-20261120-1121 — Botón inmediato Atrás para el teléfono seleccionado
+
+- Fecha y hora: 2026-11-20 11:21 (America/Mexico_City).
+- Tipo: Funcionalidad / Secuencias.
+- Estado: Completado y validado técnicamente.
+- Solicitud: agregar un botón que realice `Back` en el teléfono, publicar la actualización en el servidor y abrir la aplicación nueva.
+- Implementación:
+  - Se añadió `← Atrás en teléfono` a la barra superior de Secuencias.
+  - La ventana independiente de captura incluye el acceso corto `← Atrás` junto a `Actualizar captura`.
+  - Ambos envían el evento Android `KEYCODE_BACK` (`keyevent 4`) únicamente al teléfono seleccionado.
+  - Se exige seleccionar exactamente un dispositivo; el control queda bloqueado mientras una secuencia está en ejecución.
+  - Después del retroceso, si la ventana independiente continúa abierta, la captura se actualiza automáticamente.
+  - La acción `Atrás` del catálogo permanece disponible para guardar el mismo evento dentro de un procedimiento.
+- Archivos modificados: `panel.py`, `Construir Ejecutable.ps1`, `LEEME.txt` y `BITACORA.md`.
+- Pruebas realizadas:
+  - `python -m py_compile panel.py license_guard.py`: correcto.
+  - `git diff --check`: correcto.
+  - Prueba aislada: el botón envió exactamente `shell input keyevent 4` al único teléfono seleccionado y actualizó el estado.
+  - Construcción PyInstaller 1.88.23 terminada correctamente con OpenCV y herramientas ADB incluidas.
+- Entrega: `release_1.88.23/TERAsoft.exe` (87,100,691 bytes) y `SHA256.txt`.
+- SHA-256: `FB528CE1BC6D6E3F377DEF5A1620FA38483C7288FA540015BC2289518B748E92`.
+- Referencia previa de rollback: commit `f160bc6`, ejecutable 1.88.22 y respaldo del servidor `CHG-20261120-1038`.
+- Publicado o respaldado: pendiente de commit y publicación al servidor.
+- Procedimiento de rollback: revertir el commit funcional resultante y abrir la versión 1.88.22.
+
 ### CHG-20261120-1038 — Acción dedicada “Escribe algo...” y corrección de captura negra
 
 - Fecha y hora: 2026-11-20 10:38 (America/Mexico_City).
