@@ -47,8 +47,11 @@ Esta bitácora registra el estado base del proyecto y todos los cambios que se r
 - Entrega: `release_1.88.22/TERAsoft.exe` (87,101,222 bytes) y `SHA256.txt`.
 - SHA-256: `1FEA2F682CCC75313128518A0EF93F08B93EF712FEC6690A8C6E49085203DF04`.
 - Referencia previa de rollback: commit `103518f` de la rama `integracion` y respaldo del servidor `CHG-20261120-1028`.
-- Publicado o respaldado: pendiente de commit y publicación al servidor.
-- Procedimiento de rollback: revertir el commit funcional resultante y abrir la versión 1.88.21 o restaurar el respaldo indicado.
+- Commit funcional resultante: `05b44d7` (`feat: identificar editor y corregir captura`).
+- Publicado o respaldado: Sí; GitHub rama `integracion` y servidor `C:\Users\Admin\Desktop\Panel Celulares V2`.
+- Respaldo previo del servidor: `C:\Users\Admin\Desktop\Panel Celulares V2\_rollback\CHG-20261120-1038`.
+- Verificación de publicación: código y ejecutable coinciden por SHA-256; `TERAsoft.exe` 1.88.22 quedó abierto en la sesión visible 2 del servidor.
+- Procedimiento de rollback: revertir `05b44d7`, restaurar los archivos del respaldo indicado y abrir la versión 1.88.21.
 
 ### CHG-20261120-1028 — Eliminación controlada de secuencias guardadas
 
